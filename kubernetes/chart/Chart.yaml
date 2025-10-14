@@ -1,0 +1,5 @@
+apiVersion: v2
+name: web-form-app
+description: A web form application with Nginx and PHP
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  webform-php:
+    build: .
+    container_name: webform-php
+    volumes:
+      - ./src:/var/www/html
+    networks:
+      - webform-network
+    restart: unless-stopped
+
+  webform-nginx:
+    image: nginx:alpine
+    container_name: webform-nginx
+    ports:
+      - "8081:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./src:/var/www/html
+    depends_on:
+      - webform-php
+    networks:
+      - webform-network
+    restart: unless-stopped
+
+networks:
+  webform-network:
+    driver: bridge

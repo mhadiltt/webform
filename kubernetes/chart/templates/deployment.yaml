@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    app: {{ .Chart.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: app-code
+          mountPath: /var/www/html
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+      - name: php
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        ports:
+        - containerPort: 9000
+        volumeMounts:
+        - name: app-code
+          mountPath: /var/www/html
+        - name: logs
+          mountPath: /app/logs
+        env:
+        - name: APP_ENV
+          value: {{ .Values.env.APP_ENV }}
+      volumes:
+      - name: app-code
+        configMap:
+          name: {{ .Chart.Name }}-code
+      - name: nginx-config
+        configMap:
+          name: {{ .Chart.Name }}-nginx-config
+      - name: logs
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-code
+data:
+  {{- range $path, $content := .Files.Glob "src/**" }}
+  {{ $path }}: |-
+    {{ $.Files.Get $path | nindent 4 }}
+  {{- end }}
