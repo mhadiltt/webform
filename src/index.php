@@ -21,7 +21,7 @@
             </div>
             <button type="submit">Submit</button>
         </form>
-        
+		echo "<!-- SCM Polling Test $(date) -->" >>        
         <?php
         // Display success message if redirected from process-form
         if (isset($_GET['success']) && $_GET['success'] == '1') {
