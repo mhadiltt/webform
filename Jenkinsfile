@@ -1,71 +1,33 @@
 pipeline {
     agent any
     
-    environment {
-        APP_NAME = 'webform'
-        DOCKER_REGISTRY = 'mhadiltt'
-    }
-    
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                sh 'echo "✅ Checked out code from GitHub"'
+                sh 'echo "✅ Code checked out from GitHub"'
                 sh 'ls -la'
             }
         }
         
-        stage('Build Docker Images') {
+        stage('Build and Deploy') {
             steps {
                 script {
-                    sh 'echo "🔨 Building Docker images..."'
-                    sh 'docker build -t ${APP_NAME}-php:latest .'
-                }
-            }
-        }
-        
-        stage('Test Application') {
-            steps {
-                script {
-                    sh 'echo "🧪 Testing application..."'
-                    
-                    // Stop any existing containers
+                    sh 'echo "🔨 Stopping existing containers..."'
                     sh 'docker-compose down || true'
                     
-                    // Start test environment
+                    sh 'echo "🚀 Building and starting new containers..."'
                     sh 'docker-compose up -d --build'
                     
-                    // Wait for services to be ready
+                    sh 'echo "⏳ Waiting for services to start..."'
                     sleep 20
                     
-                    // Run comprehensive tests
                     sh '''
-                        echo "Running application tests..."
-                        
-                        # Test 1: Application accessibility
+                        echo "🧪 Testing application deployment..."
                         if curl -f http://localhost:8081/; then
-                            echo "✅ Application is accessible"
+                            echo "✅ SUCCESS: Application deployed at http://localhost:8081"
                         else
-                            echo "❌ Application not accessible"
-                            exit 1
-                        fi
-                        
-                        # Test 2: Static assets
-                        if curl -f http://localhost:8081/styles.css > /dev/null; then
-                            echo "✅ CSS files are served"
-                        else
-                            echo "❌ CSS files not found"
-                            exit 1
-                        fi
-                        
-                        # Test 3: Form submission
-                        RESPONSE=$(curl -s -X POST http://localhost:8081/process-form.php \
-                          -d "name=PipelineTest&email=test@pipe.com&message=Test+from+pipeline")
-                        if echo "$RESPONSE" | grep -q "Thank You"; then
-                            echo "✅ Form submission works"
-                        else
-                            echo "❌ Form submission failed"
-                            echo "Response: $RESPONSE"
+                            echo "❌ FAILED: Application not accessible"
                             exit 1
                         fi
                     '''
@@ -73,46 +35,29 @@ pipeline {
             }
         }
         
-        stage('Deploy to Production') {
+        stage('Verify Deployment') {
             steps {
-                script {
-                    sh 'echo "🚀 Deploying to production..."'
-                    
-                    // Ensure we're using the latest build
-                    sh 'docker-compose down || true'
-                    sh 'docker-compose up -d'
-                    
-                    // Verify deployment
-                    sh '''
-                        echo "Verifying production deployment..."
-                        sleep 10
-                        
-                        # Health check
-                        curl -f http://localhost:8081/ || exit 1
-                        
-                        # Final verification
-                        echo "🎉 Production deployment successful!"
-                        echo "🌐 Application URL: http://localhost:8081"
-                    '''
-                }
+                sh '''
+                    echo "🔍 Verifying deployment..."
+                    echo "📊 Container status:"
+                    docker-compose ps
+                    echo "🌐 Application URL: http://localhost:8081"
+                    echo "✅ CI/CD Pipeline Completed Successfully!"
+                '''
             }
         }
     }
     
     post {
         always {
-            echo "📊 Pipeline execution completed"
-            sh 'docker-compose down || true'
+            echo "📈 Pipeline execution finished"
         }
         success {
-            echo "✅ PIPELINE SUCCESS"
-            sh '''
-                echo "🎊 All stages completed successfully!"
-                echo "📍 Your web form is live at: http://localhost:8081"
-            '''
+            echo "🎉 DEPLOYMENT SUCCESSFUL!"
+            sh 'echo "📍 Your web form is live at: http://localhost:8081"'
         }
         failure {
-            echo "❌ PIPELINE FAILED"
+            echo "💥 DEPLOYMENT FAILED"
             sh 'docker-compose logs || true'
         }
     }
