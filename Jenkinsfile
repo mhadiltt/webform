@@ -20,11 +20,15 @@ pipeline {
         stage('Stop Existing Containers') {
             steps {
                 sh '''
-                    echo "🔨 Stopping and removing existing containers..."
-                    docker-compose down --remove-orphans || true
+                    echo "🔨 Stopping only webform containers..."
+                    # SAFE: Only stop containers with "webform" in the name
+                    docker-compose -p webform down --remove-orphans 2>/dev/null || true
                     docker rm -f webform-nginx webform-php 2>/dev/null || true
-                    docker container prune -f || true
-                    echo "✅ Environment cleaned"
+                    
+                    # REMOVED: docker container prune -f (DANGEROUS - removes all stopped containers including Jenkins)
+                    # REMOVED: docker image prune -f (DANGEROUS - removes unused images)
+                    
+                    echo "✅ Webform environment cleaned safely"
                 '''
             }
         }
@@ -36,7 +40,7 @@ pipeline {
                     docker build -t $PHP_IMAGE .
 
                     echo "🚀 Building webform-nginx image..."
-                    docker build -t $NGINX_IMAGE -f Dockerfile.nginx . || echo "Using default nginx image"
+                    docker build -t $NGINX_IMAGE -f Dockerfile.nginx . 2>/dev/null || echo "⚠️ Using default nginx image"
                     
                     # If custom nginx image fails, use tagged alpine
                     if ! docker images | grep -q "$NGINX_IMAGE"; then
@@ -57,8 +61,8 @@ pipeline {
                     echo "Current directory: $(pwd)"
                     echo "Files in src/: $(find src/ -type f | wc -l) files"
                     find src/ -type f
-                    echo "--- Docker images ---"
-                    docker images | grep hadil01 || echo "No hadil01 images found yet"
+                    echo "--- Webform Docker images ---"
+                    docker images | grep webform || echo "No webform images found yet"
                 '''
             }
         }
@@ -67,8 +71,8 @@ pipeline {
             steps {
                 sh '''
                     echo "🚀 Starting containers..."
-                    # Try docker-compose first, fallback to manual docker run
-                    if docker-compose up -d --build; then
+                    # SAFE: Use project-specific compose to avoid affecting Jenkins
+                    if docker-compose -p webform up -d --build; then
                         echo "✅ Started with docker-compose"
                     else
                         echo "⚠️ Docker-compose failed, starting manually..."
@@ -90,8 +94,8 @@ pipeline {
                     echo "⏳ Waiting for services to start..."
                     sleep 20
                     
-                    echo "🔍 Checking container status..."
-                    docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
+                    echo "🔍 Checking container status (webform only)..."
+                    docker ps --filter "name=webform" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
                 '''
             }
         }
@@ -117,8 +121,8 @@ pipeline {
                         else
                             echo "❌ All connection methods failed"
                             echo "🔍 Debug information:"
-                            docker-compose logs || docker logs webform-nginx || echo "No nginx logs"
-                            docker logs webform-php || echo "No PHP logs"
+                            docker-compose -p webform logs 2>/dev/null || docker logs webform-nginx 2>/dev/null || echo "No nginx logs"
+                            docker logs webform-php 2>/dev/null || echo "No PHP logs"
                             exit 1
                         fi
                     fi
@@ -156,8 +160,8 @@ pipeline {
             steps {
                 sh '''
                     echo "🔍 Final verification..."
-                    echo "📊 Running containers:"
-                    docker-compose ps || docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
+                    echo "📊 Running containers (webform only):"
+                    docker-compose -p webform ps 2>/dev/null || docker ps --filter "name=webform" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
                     
                     JENKINS_IP=$(hostname -i | awk '{print $1}')
                     echo "🌐 Application URLs:"
@@ -165,7 +169,7 @@ pipeline {
                     echo "   http://localhost:8081"
                     
                     echo "🐳 Docker images pushed:"
-                    docker images | grep hadil01 || echo "No hadil01 images found"
+                    docker images | grep webform || echo "No webform images found"
                 '''
             }
         }
@@ -175,10 +179,10 @@ pipeline {
         always {
             echo "📈 Pipeline execution completed"
             sh '''
-                echo "🧹 Cleaning up..."
-                docker-compose down --remove-orphans || true
+                echo "🧹 SAFE cleanup - only webform containers..."
+                docker-compose -p webform down --remove-orphans 2>/dev/null || true
                 docker rm -f webform-nginx webform-php 2>/dev/null || true
-                echo "✅ Cleanup completed"
+                echo "✅ Safe cleanup completed"
             '''
         }
         success {
@@ -194,11 +198,11 @@ pipeline {
         failure {
             echo "❌ PIPELINE FAILED"
             sh '''
-                echo "🔍 Debug information:"
-                echo "📊 All containers:"
-                docker ps -a
+                echo "🔍 Debug information (webform containers only):"
+                echo "📊 All webform containers:"
+                docker ps -a --filter "name=webform" || echo "No webform containers found"
                 echo "📝 Recent logs:"
-                docker-compose logs --tail=20 || echo "No docker-compose logs"
+                docker-compose -p webform logs --tail=20 2>/dev/null || echo "No docker-compose logs"
                 docker logs webform-nginx --tail=20 2>/dev/null || echo "No nginx logs"
                 docker logs webform-php --tail=20 2>/dev/null || echo "No PHP logs"
             '''
