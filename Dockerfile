@@ -21,6 +21,9 @@ COPY src/ /var/www/html/
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
 
+# ADD THIS LINE FOR PHP-FPM SOCKETS
+RUN mkdir -p /var/run/php
+
 EXPOSE 9000
 
 CMD ["php-fpm"]
