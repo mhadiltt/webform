@@ -3,9 +3,8 @@ pipeline {
 
     environment {
         DOCKERHUB_USERNAME = "hadil01"
-        PHP_IMAGE = "hadil01/webform-php:latest"
-        NGINX_IMAGE = "hadil01/webform-nginx:alpine"  // Fixed spelling from "alphine" to "alpine"
-    }
+	 PHP_IMAGE = "hadil01/webform-php:${env.BUILD_NUMBER}"
+         NGINX_IMAGE = "hadil01/webform-nginx:${env.BUILD_NUMBER}"    }
 
     stages {
         stage('Checkout') {
