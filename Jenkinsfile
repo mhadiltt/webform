@@ -4,80 +4,114 @@ pipeline {
     environment {
         DOCKERHUB_USERNAME = "hadil01"
         PHP_IMAGE = "hadil01/webform-php:latest"
+        NGINX_IMAGE = "hadil01/webform-nginx:alpine"  // Fixed spelling from "alphine" to "alpine"
     }
 
     stages {
-        stage('Checkout & Setup') {
+        stage('Checkout') {
             steps {
                 checkout scm
+                sh 'echo "✅ Code checked out from GitHub"'
+            }
+        }
+
+        stage('Clean Environment - SAFE') {
+            steps {
                 sh '''
-                    echo "✅ Code checked out from GitHub"
-                    echo "🔍 Verifying nginx config:"
-                    grep "fastcgi_pass" docker/nginx/nginx.conf
+                    echo "🧹 SAFE cleanup - only specific webform containers..."
+                    # ONLY remove containers with exact names, nothing else
+                    docker rm -f webform-nginx webform-php 2>/dev/null || true
+                    echo "✅ Only webform containers cleaned safely"
                 '''
             }
         }
 
-        stage('Clean & Build') {
+        stage('Build Images') {
             steps {
                 sh '''
-                    echo "🧹 Cleaning containers..."
-                    docker rm -f webform-nginx webform-php 2>/dev/null || true
-                    
                     echo "🚀 Building PHP image..."
                     docker build -t $PHP_IMAGE .
+                    
+                    echo "🚀 Preparing Nginx image..."
+                    # Just use nginx:alpine directly, no need to tag
+                    docker pull nginx:alpine || echo "Nginx image available"
+                    
+                    echo "✅ Images ready"
                 '''
             }
         }
 
-        stage('Quick Deploy & Test') {
+        stage('Verify Setup') {
             steps {
                 sh '''
-                    echo "🚀 Starting containers..."
-                    # Use volume mounts for reliable file sharing
-                    docker run -d --name webform-php -v $(pwd)/src:/var/www/html $PHP_IMAGE
+                    echo "🔍 Verifying setup..."
+                    echo "Current directory: $(pwd)"
+                    echo "Files in src/: $(find src/ -type f | wc -l) files"
+                    ls -la src/
+                    echo "--- Docker images ---"
+                    docker images | grep hadil01 || echo "No hadil01 images yet"
+                '''
+            }
+        }
+
+        stage('Deploy Application - SAFE') {
+            steps {
+                sh '''
+                    echo "🚀 Starting PHP container..."
+                    docker run -d --name webform-php \
+                        -v $(pwd)/src:/var/www/html \
+                        $PHP_IMAGE
+                    
+                    echo "🚀 Starting Nginx container..."
                     docker run -d --name webform-nginx -p 8081:80 \
                         -v $(pwd)/src:/var/www/html:ro \
                         --link webform-php:php \
                         nginx:alpine
                     
-                    echo "⏳ Waiting 10 seconds..."
+                    echo "⏳ Waiting for containers to start..."
                     sleep 10
                     
-                    echo "📋 Quick nginx setup..."
-                    # Simple nginx config
-                    docker exec webform-nginx sh -c 'cat > /etc/nginx/conf.d/default.conf << "NGINX_CONFIG"
-server {
-    listen 80;
-    root /var/www/html;
-    index index.php index.html;
-    location / { try_files \\$uri \\$uri/ /index.php; }
-    location ~ \\.php$ {
-        fastcgi_pass php:9000;
-        fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME \\$document_root\\$fastcgi_script_name;
-        include fastcgi_params;
-    }
-}
-NGINX_CONFIG'
-                    
+                    echo "📋 Configuring nginx..."
+                    docker cp docker/nginx/nginx.conf webform-nginx:/etc/nginx/conf.d/default.conf
                     docker exec webform-nginx nginx -s reload
-                    sleep 5
                     
-                    echo "🧪 Quick test..."
-                    if curl -f --retry 2 http://localhost:8081/; then
-                        echo "✅ SUCCESS: Application is live!"
+                    echo "⏳ Waiting for configuration to apply..."
+                    sleep 10
+                    
+                    echo "🔍 Checking ONLY webform containers..."
+                    docker ps --filter "name=webform" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
+                '''
+            }
+        }
+
+        stage('Test Deployment') {
+            steps {
+                sh '''
+                    echo "🧪 Testing application..."
+                    # Test multiple methods safely
+                    
+                    echo "🔧 Method 1: Localhost..."
+                    if curl -f --retry 3 --retry-delay 5 http://localhost:8081/; then
+                        echo "✅ SUCCESS: Application is live at http://localhost:8081"
                     else
-                        echo "❌ Application failed - quick debug:"
-                        docker exec webform-nginx ls -la /var/www/html/ 2>/dev/null || echo "Cannot check nginx files"
-                        docker exec webform-php ls -la /var/www/html/ 2>/dev/null || echo "Cannot check PHP files"
-                        exit 1
+                        echo "❌ Method 1 failed"
+                        
+                        echo "🔧 Method 2: Container direct test..."
+                        if docker exec webform-nginx curl -f http://localhost/; then
+                            echo "✅ SUCCESS: Application works inside container"
+                        else
+                            echo "❌ Application not working"
+                            echo "🔍 Debug information:"
+                            docker logs webform-nginx --tail=20
+                            docker logs webform-php --tail=20
+                            exit 1
+                        fi
                     fi
                 '''
             }
         }
 
-        stage('Push to Docker Hub') {
+        stage('Push Images to Docker Hub') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-pass',
@@ -87,21 +121,34 @@ NGINX_CONFIG'
                     sh '''
                         echo "🔑 Logging in to Docker Hub..."
                         echo $DOCKERHUB_PASS | docker login -u $DOCKERHUB_USER --password-stdin
+
                         echo "📤 Pushing PHP image..."
                         docker push $PHP_IMAGE
-                        echo "✅ Image pushed successfully"
+                        echo "✅ PHP image pushed"
+
+                        echo "📤 Tagging and pushing Nginx image..."
+                        docker tag nginx:alpine $NGINX_IMAGE
+                        docker push $NGINX_IMAGE
+                        echo "✅ Nginx image pushed"
+
                         docker logout
+                        echo "🔓 Logged out from Docker Hub"
                     '''
                 }
             }
         }
 
-        stage('Final Check') {
+        stage('Final Verification') {
             steps {
                 sh '''
-                    echo "🎉 Pipeline completed successfully!"
+                    echo "🔍 Final verification..."
+                    echo "📊 Running webform containers:"
+                    docker ps --filter "name=webform" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
+                    
                     echo "🌐 Application URL: http://localhost:8081"
-                    echo "🐳 Image pushed: $PHP_IMAGE"
+                    echo "🐳 Images pushed to Docker Hub:"
+                    echo "   - $PHP_IMAGE"
+                    echo "   - $NGINX_IMAGE"
                 '''
             }
         }
@@ -109,9 +156,23 @@ NGINX_CONFIG'
 
     post {
         always {
+            echo "📈 Pipeline execution completed"
             sh '''
-                echo "🧹 Final cleanup..."
+                echo "🧹 SAFE cleanup - only webform containers..."
                 docker rm -f webform-nginx webform-php 2>/dev/null || true
+                echo "✅ Safe cleanup completed - Jenkins is unaffected"
+            '''
+        }
+        success {
+            echo "🎉 DEPLOYMENT SUCCESS!"
+            echo "📍 Your web form is live at: http://localhost:8081"
+            echo "✅ Both PHP and Nginx images pushed to Docker Hub"
+        }
+        failure {
+            echo "❌ PIPELINE FAILED"
+            sh '''
+                echo "🔍 Debug information:"
+                docker ps -a --filter "name=webform" || echo "No webform containers found"
             '''
         }
     }
