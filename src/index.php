@@ -8,7 +8,7 @@
 </head>
 <body>
     <div class="container">
-        <h2>Contact Form hadil</h2>
+        <h2>Contact Form hadilnew</h2>
         <form action="process-form.php" method="POST">
             <div class="form-group">
                 <input type="text" name="name" placeholder="Your Name" required>
@@ -21,7 +21,6 @@
             </div>
             <button type="submit">Submit</button>
         </form>
-		echo "<!-- SCM Polling Test $(date) -->" >>        
         <?php
         // Display success message if redirected from process-form
         if (isset($_GET['success']) && $_GET['success'] == '1') {
