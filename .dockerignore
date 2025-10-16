@@ -1,0 +1,7 @@
+jenkins_home/
+.git/
+.github/
+kubernetes/
+docker/nginx/
+*.md
+*.log

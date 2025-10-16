@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  repository: your-registry/web-form-app
+  repository: mhadiltt/webform-app
   tag: latest
   pullPolicy: IfNotPresent
 
