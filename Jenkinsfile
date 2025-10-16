@@ -11,12 +11,21 @@ pipeline {
         stage('📥 Checkout Code') {
             steps {
                 checkout scm
+                sh '''
+                    echo "Ensuring latest code..."
+                    git pull origin main
+                    echo "✅ Latest code: $(git log -1 --oneline)"
+                '''
             }
         }
 
         stage('🧹 Clean Environment') {
             steps {
-                sh 'docker rm -f webform-nginx webform-php 2>/dev/null || true'
+                sh '''
+                    echo "Cleaning up..."
+                    docker-compose down || true
+                    docker rm -f webform-nginx webform-php 2>/dev/null || true
+                '''
             }
         }
 
@@ -34,16 +43,10 @@ pipeline {
         stage('🚀 Deploy Application') {
             steps {
                 sh '''
-                    echo "Starting PHP container..."
-                    docker run -d --name webform-php -v $(pwd)/src:/var/www/html $PHP_IMAGE
-                    echo "Starting Nginx container..."
-                    docker run -d --name webform-nginx -p 8081:80 -v $(pwd)/src:/var/www/html:ro --link webform-php:php nginx:alpine
-                    echo "Waiting for containers to start..."
+                    echo "Starting services with Docker Compose..."
+                    docker-compose up -d webform-php webform-nginx
+                    echo "Waiting for services to start..."
                     sleep 10
-                    echo "Configuring Nginx..."
-                    docker cp docker/nginx/nginx.conf webform-nginx:/etc/nginx/conf.d/default.conf
-                    docker exec webform-nginx nginx -s reload
-                    sleep 5
                 '''
             }
         }
@@ -52,8 +55,8 @@ pipeline {
             steps {
                 sh '''
                     echo "Testing application..."
-                    if docker exec webform-nginx curl -f http://localhost/; then
-                        echo "✅ Application works inside container"
+                    if curl -f http://localhost:8081/; then
+                        echo "✅ Application is accessible"
                     else
                         echo "❌ Application failed"
                         exit 1
