@@ -4,9 +4,7 @@ pipeline {
     environment {
         COMPOSE_PROJECT_NAME = "webform"
         DOCKERHUB_USERNAME = "hadil01"
-        DOCKERHUB_PASSWORD = credentials("dockerhub-pass") // Add Docker Hub password in Jenkins
         PHP_IMAGE = "hadil01/webform-php:latest"
-        NGINX_IMAGE = "hadil01/webform-nginx:latest"
     }
 
     stages {
@@ -18,13 +16,14 @@ pipeline {
             }
         }
 
-        stage('Stop Existing Containers') {
+        stage('Stop Webform Containers') {
             steps {
                 sh '''
-                    echo "🔨 Stopping and removing existing containers..."
-                    docker-compose down --remove-orphans || true
-                    docker container prune -f || true
-                    docker image prune -f || true
+                    echo "🔨 Stopping only webform containers..."
+                    # Stop only webform containers, not all containers
+                    docker stop webform-nginx webform-php 2>/dev/null || true
+                    docker rm webform-nginx webform-php 2>/dev/null || true
+                    echo "✅ Webform containers stopped"
                 '''
             }
         }
@@ -33,11 +32,9 @@ pipeline {
             steps {
                 sh '''
                     echo "🚀 Building webform-php image..."
-                    docker build -t $PHP_IMAGE -f Dockerfile .
+                    docker build -t $PHP_IMAGE .
 
-                    echo "🚀 Pulling nginx image..."
-                    docker pull nginx:alpine
-                    docker tag nginx:alpine $NGINX_IMAGE
+                    echo "✅ Docker images built successfully"
                 '''
             }
         }
@@ -47,12 +44,12 @@ pipeline {
                 sh '''
                     echo "🚀 Starting containers..."
                     docker-compose up -d --build
-                    echo "⏳ Waiting for services..."
+                    echo "⏳ Waiting for services to start..."
                     sleep 20
 
                     echo "🧪 Testing application..."
                     if curl -f http://localhost:8081/; then
-                        echo "✅ Application is live!"
+                        echo "✅ Application is live at http://localhost:8081"
                     else
                         echo "❌ Application not accessible"
                         exit 1
@@ -63,18 +60,22 @@ pipeline {
 
         stage('Push Images to Docker Hub') {
             steps {
-                sh '''
-                    echo "🔑 Logging in to Docker Hub..."
-                    echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USERNAME --password-stdin
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-pass',
+                    usernameVariable: 'DOCKERHUB_USER',
+                    passwordVariable: 'DOCKERHUB_PASS'
+                )]) {
+                    sh '''
+                        echo "🔑 Logging in to Docker Hub..."
+                        echo $DOCKERHUB_PASS | docker login -u $DOCKERHUB_USER --password-stdin
 
-                    echo "📤 Pushing webform-php..."
-                    docker push $PHP_IMAGE
+                        echo "📤 Pushing webform-php image..."
+                        docker push $PHP_IMAGE
 
-                    echo "📤 Pushing nginx image..."
-                    docker push $NGINX_IMAGE
-
-                    docker logout
-                '''
+                        echo "✅ Images pushed successfully"
+                        docker logout
+                    '''
+                }
             }
         }
 
@@ -82,8 +83,10 @@ pipeline {
             steps {
                 sh '''
                     echo "🔍 Deployment verification..."
+                    echo "📊 Running containers:"
                     docker-compose ps
                     echo "🌐 Application URL: http://localhost:8081"
+                    echo "✅ CI/CD Pipeline completed successfully!"
                 '''
             }
         }
@@ -91,27 +94,15 @@ pipeline {
 
     post {
         always {
-            script {
-                // Wrap in node block to avoid MissingContextVariableException
-                node {
-                    echo "📈 Pipeline finished"
-                    sh 'docker-compose logs || true'
-                }
-            }
+            echo "📈 Pipeline execution completed"
         }
-
         success {
-            echo "🎉 Deployment & push SUCCESS!"
-            echo "📍 Your web form is live at http://localhost:8081"
+            echo "🎉 SUCCESS: Deployment completed!"
+            sh 'echo "📍 Your web form is live at: http://localhost:8081"'
         }
-
         failure {
-            script {
-                node {
-                    echo "💥 PIPELINE FAILED!"
-                    sh 'docker-compose logs || true'
-                }
-            }
+            echo "❌ FAILED: Pipeline execution failed"
+            sh 'docker-compose logs || true'
         }
     }
 }
