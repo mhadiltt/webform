@@ -24,7 +24,7 @@
         <?php
         // Display success message if redirected from process-form
         if (isset($_GET['success']) && $_GET['success'] == '1') {
-            echo '<div class="success-message">Thank you! Your message has been received.</div>';
+             '<div class="success-message">Thank you! Your message has been received.</div>';
         }
         ?>
     </div>
