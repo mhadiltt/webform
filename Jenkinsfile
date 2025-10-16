@@ -157,10 +157,10 @@ pipeline {
     post {
         always {
             echo "📈 Pipeline execution completed"
-            sh '''
-                echo "🧹 SAFE cleanup - only webform containers..."
-                docker rm -f webform-nginx webform-php 2>/dev/null || true
-                echo "✅ Safe cleanup completed - Jenkins is unaffected"
+           # sh '''
+            #    echo "🧹 SAFE cleanup - only webform containers..."
+             #   docker rm -f webform-nginx webform-php 2>/dev/null || true
+              #  echo "✅ Safe cleanup completed - Jenkins is unaffected"
             '''
         }
         success {
