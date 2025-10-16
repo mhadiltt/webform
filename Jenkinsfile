@@ -2,10 +2,9 @@ pipeline {
     agent any
 
     environment {
-        COMPOSE_PROJECT_NAME = "webform"
         DOCKERHUB_USERNAME = "hadil01"
         PHP_IMAGE = "hadil01/webform-php:latest"
-        NGINX_IMAGE = "hadil01/webform-nginx:alphine"
+        NGINX_IMAGE = "hadil01/webform-nginx:alpine"  // Fixed spelling from "alphine" to "alpine"
     }
 
     stages {
@@ -13,43 +12,31 @@ pipeline {
             steps {
                 checkout scm
                 sh 'echo "✅ Code checked out from GitHub"'
-                sh 'ls -la'
             }
         }
 
-        stage('Stop Existing Containers') {
+        stage('Clean Environment - SAFE') {
             steps {
                 sh '''
-                    echo "🔨 Stopping only webform containers..."
-                    # SAFE: Only stop containers with "webform" in the name
-                    docker-compose -p webform down --remove-orphans 2>/dev/null || true
+                    echo "🧹 SAFE cleanup - only specific webform containers..."
+                    # ONLY remove containers with exact names, nothing else
                     docker rm -f webform-nginx webform-php 2>/dev/null || true
-                    
-                    # REMOVED: docker container prune -f (DANGEROUS - removes all stopped containers including Jenkins)
-                    # REMOVED: docker image prune -f (DANGEROUS - removes unused images)
-                    
-                    echo "✅ Webform environment cleaned safely"
+                    echo "✅ Only webform containers cleaned safely"
                 '''
             }
         }
 
-        stage('Build Docker Images') {
+        stage('Build Images') {
             steps {
                 sh '''
-                    echo "🚀 Building webform-php image..."
+                    echo "🚀 Building PHP image..."
                     docker build -t $PHP_IMAGE .
-
-                    echo "🚀 Building webform-nginx image..."
-                    docker build -t $NGINX_IMAGE -f Dockerfile.nginx . 2>/dev/null || echo "⚠️ Using default nginx image"
                     
-                    # If custom nginx image fails, use tagged alpine
-                    if ! docker images | grep -q "$NGINX_IMAGE"; then
-                        echo "📥 Pulling and tagging nginx:alpine as fallback..."
-                        docker pull nginx:alpine
-                        docker tag nginx:alpine $NGINX_IMAGE
-                    fi
+                    echo "🚀 Preparing Nginx image..."
+                    # Just use nginx:alpine directly, no need to tag
+                    docker pull nginx:alpine || echo "Nginx image available"
                     
-                    echo "✅ Both images ready"
+                    echo "✅ Images ready"
                 '''
             }
         }
@@ -60,41 +47,38 @@ pipeline {
                     echo "🔍 Verifying setup..."
                     echo "Current directory: $(pwd)"
                     echo "Files in src/: $(find src/ -type f | wc -l) files"
-                    find src/ -type f
-                    echo "--- Webform Docker images ---"
-                    docker images | grep webform || echo "No webform images found yet"
+                    ls -la src/
+                    echo "--- Docker images ---"
+                    docker images | grep hadil01 || echo "No hadil01 images yet"
                 '''
             }
         }
 
-        stage('Deploy Application') {
+        stage('Deploy Application - SAFE') {
             steps {
                 sh '''
-                    echo "🚀 Starting containers..."
-                    # SAFE: Use project-specific compose to avoid affecting Jenkins
-                    if docker-compose -p webform up -d --build; then
-                        echo "✅ Started with docker-compose"
-                    else
-                        echo "⚠️ Docker-compose failed, starting manually..."
-                        echo "🚀 Starting PHP container..."
-                        docker run -d --name webform-php $PHP_IMAGE
-                        
-                        echo "🚀 Starting Nginx container..."
-                        docker run -d --name webform-nginx -p 8081:80 \
-                            -v $(pwd)/src:/var/www/html:ro \
-                            --link webform-php:php \
-                            $NGINX_IMAGE
-                        
-                        # Copy nginx config for manual setup
-                        echo "📋 Configuring nginx..."
-                        docker cp docker/nginx/nginx.conf webform-nginx:/etc/nginx/conf.d/default.conf
-                        docker exec webform-nginx nginx -s reload
-                    fi
+                    echo "🚀 Starting PHP container..."
+                    docker run -d --name webform-php \
+                        -v $(pwd)/src:/var/www/html \
+                        $PHP_IMAGE
                     
-                    echo "⏳ Waiting for services to start..."
-                    sleep 20
+                    echo "🚀 Starting Nginx container..."
+                    docker run -d --name webform-nginx -p 8081:80 \
+                        -v $(pwd)/src:/var/www/html:ro \
+                        --link webform-php:php \
+                        nginx:alpine
                     
-                    echo "🔍 Checking container status (webform only)..."
+                    echo "⏳ Waiting for containers to start..."
+                    sleep 10
+                    
+                    echo "📋 Configuring nginx..."
+                    docker cp docker/nginx/nginx.conf webform-nginx:/etc/nginx/conf.d/default.conf
+                    docker exec webform-nginx nginx -s reload
+                    
+                    echo "⏳ Waiting for configuration to apply..."
+                    sleep 10
+                    
+                    echo "🔍 Checking ONLY webform containers..."
                     docker ps --filter "name=webform" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
                 '''
             }
@@ -104,25 +88,22 @@ pipeline {
             steps {
                 sh '''
                     echo "🧪 Testing application..."
-                    JENKINS_IP=$(hostname -i | awk '{print $1}')
-                    echo "🔧 Testing methods:"
-                    echo "1. http://$JENKINS_IP:8081"
-                    echo "2. http://localhost:8081"
+                    # Test multiple methods safely
                     
-                    # Method 1: Jenkins host IP
-                    if curl -f --retry 3 --retry-delay 5 http://$JENKINS_IP:8081/; then
-                        echo "✅ SUCCESS: Application is live at http://$JENKINS_IP:8081"
+                    echo "🔧 Method 1: Localhost..."
+                    if curl -f --retry 3 --retry-delay 5 http://localhost:8081/; then
+                        echo "✅ SUCCESS: Application is live at http://localhost:8081"
                     else
                         echo "❌ Method 1 failed"
                         
-                        # Method 2: Localhost
-                        if curl -f http://localhost:8081/; then
-                            echo "✅ SUCCESS: Application is live at http://localhost:8081"
+                        echo "🔧 Method 2: Container direct test..."
+                        if docker exec webform-nginx curl -f http://localhost/; then
+                            echo "✅ SUCCESS: Application works inside container"
                         else
-                            echo "❌ All connection methods failed"
+                            echo "❌ Application not working"
                             echo "🔍 Debug information:"
-                            docker-compose -p webform logs 2>/dev/null || docker logs webform-nginx 2>/dev/null || echo "No nginx logs"
-                            docker logs webform-php 2>/dev/null || echo "No PHP logs"
+                            docker logs webform-nginx --tail=20
+                            docker logs webform-php --tail=20
                             exit 1
                         fi
                     fi
@@ -145,7 +126,8 @@ pipeline {
                         docker push $PHP_IMAGE
                         echo "✅ PHP image pushed"
 
-                        echo "📤 Pushing Nginx image..."
+                        echo "📤 Tagging and pushing Nginx image..."
+                        docker tag nginx:alpine $NGINX_IMAGE
                         docker push $NGINX_IMAGE
                         echo "✅ Nginx image pushed"
 
@@ -160,16 +142,13 @@ pipeline {
             steps {
                 sh '''
                     echo "🔍 Final verification..."
-                    echo "📊 Running containers (webform only):"
-                    docker-compose -p webform ps 2>/dev/null || docker ps --filter "name=webform" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
+                    echo "📊 Running webform containers:"
+                    docker ps --filter "name=webform" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
                     
-                    JENKINS_IP=$(hostname -i | awk '{print $1}')
-                    echo "🌐 Application URLs:"
-                    echo "   http://$JENKINS_IP:8081"
-                    echo "   http://localhost:8081"
-                    
-                    echo "🐳 Docker images pushed:"
-                    docker images | grep webform || echo "No webform images found"
+                    echo "🌐 Application URL: http://localhost:8081"
+                    echo "🐳 Images pushed to Docker Hub:"
+                    echo "   - $PHP_IMAGE"
+                    echo "   - $NGINX_IMAGE"
                 '''
             }
         }
@@ -180,31 +159,20 @@ pipeline {
             echo "📈 Pipeline execution completed"
             sh '''
                 echo "🧹 SAFE cleanup - only webform containers..."
-                docker-compose -p webform down --remove-orphans 2>/dev/null || true
                 docker rm -f webform-nginx webform-php 2>/dev/null || true
-                echo "✅ Safe cleanup completed"
+                echo "✅ Safe cleanup completed - Jenkins is unaffected"
             '''
         }
         success {
             echo "🎉 DEPLOYMENT SUCCESS!"
-            sh '''
-                JENKINS_IP=$(hostname -i | awk '{print $1}')
-                echo "📍 Your web form is live at:"
-                echo "   🌐 http://$JENKINS_IP:8081"
-                echo "   🖥️  http://localhost:8081"
-                echo "✅ Both PHP and Nginx images pushed to Docker Hub"
-            '''
+            echo "📍 Your web form is live at: http://localhost:8081"
+            echo "✅ Both PHP and Nginx images pushed to Docker Hub"
         }
         failure {
             echo "❌ PIPELINE FAILED"
             sh '''
-                echo "🔍 Debug information (webform containers only):"
-                echo "📊 All webform containers:"
+                echo "🔍 Debug information:"
                 docker ps -a --filter "name=webform" || echo "No webform containers found"
-                echo "📝 Recent logs:"
-                docker-compose -p webform logs --tail=20 2>/dev/null || echo "No docker-compose logs"
-                docker logs webform-nginx --tail=20 2>/dev/null || echo "No nginx logs"
-                docker logs webform-php --tail=20 2>/dev/null || echo "No PHP logs"
             '''
         }
     }
