@@ -157,7 +157,6 @@ pipeline {
     post {
         always {
             echo "📈 Pipeline execution completed"
-            '''
         }
         success {
             echo "🎉 DEPLOYMENT SUCCESS!"
