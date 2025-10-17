@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webform-php
+  labels:
+    app: webform-php
+spec:
+  replicas: {{ .Values.php.replicas }}
+  selector:
+    matchLabels:
+      app: webform-php
+  template:
+    metadata:
+      labels:
+        app: webform-php
+    spec:
+      containers:
+        - name: php
+          image: {{ .Values.php.image }}
+          ports:
+            - containerPort: {{ .Values.php.port }}

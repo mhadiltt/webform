@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: webform-php
+spec:
+  selector:
+    app: webform-php
+  ports:
+    - protocol: TCP
+      port: {{ .Values.php.port }}
+      targetPort: {{ .Values.php.port }}

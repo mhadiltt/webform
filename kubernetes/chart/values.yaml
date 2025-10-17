@@ -1,27 +1,10 @@
-replicaCount: 2
+php:
+  image: hadil01/webform-php:latest
+  replicas: 1
+  port: 9000
 
-phpImage:
-  repository: mhadiltt/webform-php
-  tag: latest
-
-nginxImage:
-  repository: mhadiltt/webform-nginx
-  tag: latest
-
-service:
-  type: NodePort
+nginx:
+  image: nginx:alpine
+  replicas: 1
   port: 80
-
-ingress:
-  enabled: false
-
-resources:
-  requests:
-    memory: "128Mi"
-    cpu: "100m"
-  limits:
-    memory: "256Mi"
-    cpu: "500m"
-
-env:
-  APP_ENV: production
+  configMapName: webform-nginx-config
