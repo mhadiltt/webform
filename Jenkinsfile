@@ -7,7 +7,7 @@ pipeline {
         NGINX_IMAGE = "hadil01/webform-nginx:${env.BUILD_NUMBER}"
         KUBE_NAMESPACE = "webform"
         HELM_CHART_PATH = "kubernetes/chart"
-        ARGOCD_APP_NAME = "webform-app"
+        ARGOCD_APP_NAME = "webform"
         ARGOCD_SERVER = "localhost:8082"  // your port-forwarded Argo CD server
         ARGOCD_AUTH_TOKEN = credentials('argocd-token')  // keep your Jenkins credential ID
     }
