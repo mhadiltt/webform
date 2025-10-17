@@ -5,6 +5,11 @@ pipeline {
         DOCKERHUB_USERNAME = "hadil01"
         PHP_IMAGE = "hadil01/webform-php:${env.BUILD_NUMBER}"
         NGINX_IMAGE = "hadil01/webform-nginx:${env.BUILD_NUMBER}"
+        KUBE_NAMESPACE = "webform"
+        HELM_CHART_PATH = "kubernetes/chart"
+        ARGOCD_APP_NAME = "webform-app"
+        ARGOCD_SERVER = "localhost:8082"  // your port-forwarded Argo CD server
+        ARGOCD_AUTH_TOKEN = credentials('argocd-token')  // keep your Jenkins credential ID
     }
 
     stages {
@@ -19,53 +24,7 @@ pipeline {
             }
         }
 
-        stage('🧹 Clean Environment') {
-            steps {
-                sh '''
-                    echo "Cleaning up..."
-                    docker-compose down || true
-                    docker rm -f webform-nginx webform-php 2>/dev/null || true
-                '''
-            }
-        }
-
-        stage('🏗️ Build Images') {
-            steps {
-                sh '''
-                    echo "Building PHP image..."
-                    docker build -t $PHP_IMAGE .
-                    echo "Pulling Nginx image..."
-                    docker pull nginx:alpine
-                '''
-            }
-        }
-
-        stage('🚀 Deploy Application') {
-            steps {
-                sh '''
-                    echo "Starting services with Docker Compose..."
-                    docker-compose up -d webform-php webform-nginx
-                    echo "Waiting for services to start..."
-                    sleep 10
-                '''
-            }
-        }
-
-        stage('🧪 Test Deployment') {
-            steps {
-                sh '''
-                    echo "Testing application..."
-                    if curl -f http://localhost:8081/; then
-                        echo "✅ Application is accessible"
-                    else
-                        echo "❌ Application failed"
-                        exit 1
-                    fi
-                '''
-            }
-        }
-
-        stage('📤 Push Images') {
+        stage('🏗️ Build & Push Images') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-pass',
@@ -73,6 +32,8 @@ pipeline {
                     passwordVariable: 'DOCKERHUB_PASS'
                 )]) {
                     sh '''
+                        echo "Building PHP image..."
+                        docker build -t $PHP_IMAGE .
                         echo "Logging in to Docker Hub..."
                         echo $DOCKERHUB_PASS | docker login -u $DOCKERHUB_USER --password-stdin
                         echo "Pushing PHP image..."
@@ -81,22 +42,31 @@ pipeline {
                         docker tag nginx:alpine $NGINX_IMAGE
                         docker push $NGINX_IMAGE
                         docker logout
-                        echo "Logged out from Docker Hub"
+                        echo "✅ Images pushed to Docker Hub"
                     '''
                 }
+            }
+        }
+
+        stage('🚀 Deploy via Argo CD') {
+            steps {
+                sh '''
+                    echo "Triggering Argo CD sync..."
+                    argocd app sync $ARGOCD_APP_NAME --auth-token $ARGOCD_AUTH_TOKEN --server $ARGOCD_SERVER
+                    argocd app wait $ARGOCD_APP_NAME --auth-token $ARGOCD_AUTH_TOKEN --server $ARGOCD_SERVER --timeout 300
+                    echo "✅ Deployment completed via Argo CD"
+                '''
             }
         }
     }
 
     post {
         success {
-            echo "🎉 DEPLOYMENT SUCCESS!"
-            echo "📍 Your web form is live at: http://localhost:8081"
-            echo "✅ Images pushed to Docker Hub with tag: ${env.BUILD_NUMBER}"
+            echo "🎉 Deployment successful via Argo CD!"
+            echo "✅ Docker images pushed: PHP=$PHP_IMAGE, Nginx=$NGINX_IMAGE"
         }
         failure {
-            echo "❌ PIPELINE FAILED"
-            sh 'docker ps -a --filter "name=webform" || echo "No webform containers found"'
+            echo "❌ Pipeline failed!"
         }
     }
 }
