@@ -6,9 +6,9 @@ metadata:
     app: {{ .Chart.Name }}
 spec:
   type: {{ .Values.service.type }}
+  selector:
+    app: {{ .Chart.Name }}
   ports:
     - port: {{ .Values.service.port }}
       targetPort: 80
       protocol: TCP
-  selector:
-    app: {{ .Chart.Name }}

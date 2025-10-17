@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:alpine
+        image: {{ .Values.nginxImage.repository }}:{{ .Values.nginxImage.tag }}
         ports:
         - containerPort: 80
         volumeMounts:
@@ -25,7 +25,7 @@ spec:
         - name: nginx-config
           mountPath: /etc/nginx/conf.d
       - name: php
-        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        image: {{ .Values.phpImage.repository }}:{{ .Values.phpImage.tag }}
         ports:
         - containerPort: 9000
         volumeMounts:

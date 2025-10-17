@@ -1,12 +1,15 @@
 replicaCount: 2
 
-image:
-  repository: mhadiltt/webform-app
+phpImage:
+  repository: mhadiltt/webform-php
   tag: latest
-  pullPolicy: IfNotPresent
+
+nginxImage:
+  repository: mhadiltt/webform-nginx
+  tag: latest
 
 service:
-  type: LoadBalancer
+  type: NodePort
   port: 80
 
 ingress:
