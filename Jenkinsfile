@@ -8,8 +8,7 @@ pipeline {
         KUBE_NAMESPACE = "webform"
         HELM_CHART_PATH = "kubernetes/chart"
         ARGOCD_APP_NAME = "webform"
-        ARGOCD_SERVER = "localhost:8090"  // your port-forwarded Argo CD server
-        ARGOCD_AUTH_TOKEN = credentials('argocd-token')  // keep your Jenkins credential ID
+        ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
     }
 
     stages {
@@ -50,12 +49,36 @@ pipeline {
 
         stage('🚀 Deploy via Argo CD') {
             steps {
-                sh '''
-                    echo "Triggering Argo CD sync..."
-                    argocd app sync $ARGOCD_APP_NAME --auth-token $ARGOCD_AUTH_TOKEN --server $ARGOCD_SERVER
-                    argocd app wait $ARGOCD_APP_NAME --auth-token $ARGOCD_AUTH_TOKEN --server $ARGOCD_SERVER --timeout 300
-                    echo "✅ Deployment completed via Argo CD"
-                '''
+                withCredentials([usernamePassword(
+                    credentialsId: 'argocd-jenkins-creds',
+                    usernameVariable: 'ARGOCD_USER',
+                    passwordVariable: 'ARGOCD_PASS'
+                )]) {
+                    sh '''
+                        echo "🔧 Installing ArgoCD CLI..."
+                        apt-get update -y && apt-get install -y curl
+                        curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+                        chmod +x /usr/local/bin/argocd
+
+                        echo "🔐 Logging in to ArgoCD..."
+                        argocd login $ARGOCD_SERVER \
+                            --username $ARGOCD_USER \
+                            --password $ARGOCD_PASS \
+                            --insecure
+
+                        echo "🚀 Syncing application in ArgoCD..."
+                        n=0
+                        until [ "$n" -ge 5 ]
+                        do
+                          argocd app sync $ARGOCD_APP_NAME && break
+                          echo "Sync failed (maybe operation in progress), retrying in 10 seconds..."
+                          n=$((n+1))
+                          sleep 10
+                        done
+
+                        echo "✅ Deployment synced via ArgoCD!"
+                    '''
+                }
             }
         }
     }
