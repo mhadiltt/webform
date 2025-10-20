@@ -23,7 +23,7 @@ pipeline {
             }
         }
 
-        stage('🏗️ Build & Push Images') {
+        stage('🏗️ Build & Push Images with Kaniko') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-pass',
@@ -31,17 +31,25 @@ pipeline {
                     passwordVariable: 'DOCKERHUB_PASS'
                 )]) {
                     sh '''
-                        echo "Building PHP image..."
-                        docker build -t $PHP_IMAGE .
-                        echo "Logging in to Docker Hub..."
-                        echo $DOCKERHUB_PASS | docker login -u $DOCKERHUB_USER --password-stdin
-                        echo "Pushing PHP image..."
-                        docker push $PHP_IMAGE
-                        echo "Tagging and pushing Nginx image..."
-                        docker tag nginx:alpine $NGINX_IMAGE
-                        docker push $NGINX_IMAGE
-                        docker logout
-                        echo "✅ Images pushed to Docker Hub"
+                        echo "Building PHP image with Kaniko..."
+                        /kaniko/executor \
+                          --dockerfile=/workspace/Dockerfile \
+                          --context=/workspace \
+                          --destination=$PHP_IMAGE \
+                          --verbosity=info \
+                          --skip-tls-verify
+
+                        echo "Tagging and pushing Nginx image with Kaniko..."
+                        # For nginx:alpine, copy to workspace first
+                        cp /workspace/nginx/Dockerfile /workspace/
+                        /kaniko/executor \
+                          --dockerfile=/workspace/Dockerfile \
+                          --context=/workspace \
+                          --destination=$NGINX_IMAGE \
+                          --verbosity=info \
+                          --skip-tls-verify
+
+                        echo "✅ Images built and pushed via Kaniko"
                     '''
                 }
             }
