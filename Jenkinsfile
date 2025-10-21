@@ -14,12 +14,17 @@ pipeline {
     stages {
         stage('📥 Checkout Code') {
             steps {
-                checkout scm
-                sh '''
-                    echo "Ensuring latest code..."
-                    git pull origin main
-                    echo "✅ Latest code: $(git log -1 --oneline)"
-                '''
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-creds',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_PASS'
+                )]) {
+                    sh '''
+                        git clone https://$GIT_USER:$GIT_PASS@github.com/mhadiltt/webform.git
+                        cd webform
+                        git pull origin main
+                    '''
+                }
             }
         }
 
@@ -40,7 +45,6 @@ pipeline {
                           --skip-tls-verify
 
                         echo "Tagging and pushing Nginx image with Kaniko..."
-                        # For nginx:alpine, copy to workspace first
                         cp /workspace/nginx/Dockerfile /workspace/
                         /kaniko/executor \
                           --dockerfile=/workspace/Dockerfile \
