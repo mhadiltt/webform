@@ -1,36 +1,8 @@
 pipeline {
     agent {
         kubernetes {
-            defaultContainer 'docker'
-            yaml """
-apiVersion: v1
-kind: Pod
-spec:
-  containers:
-  - name: docker
-    image: docker:24.0.6-dind
-    securityContext:
-      privileged: true
-    env:
-      - name: DOCKER_TLS_CERTDIR
-        value: ""
-    volumeMounts:
-      - name: docker-graph-storage
-        mountPath: /var/lib/docker
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
-  - name: jnlp
-    image: jenkins/inbound-agent:latest
-    tty: true
-    volumeMounts:
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
-  volumes:
-  - name: docker-graph-storage
-    emptyDir: {}
-  - name: workspace-volume
-    emptyDir: {}
-"""
+            label 'jenkins-slave'        // Must match your Pod Template label in Jenkins UI
+            defaultContainer 'jnlp'      // The container that runs the Jenkins agent
         }
     }
 
@@ -47,12 +19,7 @@ spec:
     stages {
         stage('📥 Checkout Code') {
             steps {
-                checkout scm
-                sh '''
-                    echo "Ensuring latest code..."
-                    git pull origin main
-                    echo "✅ Latest code: $(git log -1 --oneline)"
-                '''
+                git credentialsId: 'github-creds', url: 'https://github.com/mhadiltt/webform.git', branch: 'main'
             }
         }
 
