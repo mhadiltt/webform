@@ -1,8 +1,8 @@
 pipeline {
     agent {
         kubernetes {
-            label 'jenkins-slave'        // Must match your Pod Template label in Jenkins UI
-            defaultContainer 'jnlp'      // The container that runs the Jenkins agent
+            inheritFrom 'jenkins-agent'    // Name of your Pod Template
+            defaultContainer 'jnlp'        // The container that runs the Jenkins agent
         }
     }
 
@@ -17,6 +17,7 @@ pipeline {
     }
 
     stages {
+
         stage('📥 Checkout Code') {
             steps {
                 git credentialsId: 'github-creds', url: 'https://github.com/mhadiltt/webform.git', branch: 'main'
