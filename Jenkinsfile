@@ -2,71 +2,81 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
-        PHP_IMG = "hadil01/webform-php:${IMAGE_TAG}"
-        NGINX_IMG = "hadil01/webform-nginx:${IMAGE_TAG}"
-        DOCKERHUB_CREDS = 'dockerhub-pass'
-        ARGOCD_CREDS = 'argocd-jenkins-creds'
+        DOCKERHUB_USERNAME = "hadil01"
+        PHP_IMAGE = "hadil01/webform-php:${env.BUILD_NUMBER}"
+        NGINX_IMAGE = "hadil01/webform-nginx:${env.BUILD_NUMBER}"
+        KUBE_NAMESPACE = "webform"
+        HELM_CHART_PATH = "kubernetes/chart"
+        ARGOCD_APP_NAME = "webform"
+        ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
     }
 
     stages {
-        stage('Checkout Code') {
+        stage('📥 Checkout Code') {
             steps {
                 checkout scm
+                sh '''
+                    echo "Ensuring latest code..."
+                    git pull origin main
+                    echo "✅ Latest code: $(git log -1 --oneline)"
+                '''
             }
         }
 
-        stage('Docker Login') {
+        stage('🏗️ Build & Push Images') {
             steps {
-                withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-pass',
+                    usernameVariable: 'DOCKERHUB_USER',
+                    passwordVariable: 'DOCKERHUB_PASS'
+                )]) {
+                    sh '''
+                        echo "Building PHP image..."
+                        docker build -t $PHP_IMAGE .
+                        echo "Logging in to Docker Hub..."
+                        echo $DOCKERHUB_PASS | docker login -u $DOCKERHUB_USER --password-stdin
+                        echo "Pushing PHP image..."
+                        docker push $PHP_IMAGE
+                        echo "Tagging and pushing Nginx image..."
+                        docker tag nginx:alpine $NGINX_IMAGE
+                        docker push $NGINX_IMAGE
+                        docker logout
+                        echo "✅ Images pushed to Docker Hub"
+                    '''
                 }
             }
         }
 
-        stage('Build & Push PHP Image') {
+        stage('🚀 Deploy via Argo CD') {
             steps {
-                sh '''
-                    docker build -t $PHP_IMG -f Dockerfile .
-                    docker push $PHP_IMG
-                    docker tag $PHP_IMG hadil01/webform-php:latest
-                    docker push hadil01/webform-php:latest
-                '''
-            }
-        }
-
-        stage('Build & Push NGINX Image') {
-            steps {
-                sh '''
-                    docker build -t $NGINX_IMG -f nginx/Dockerfile nginx
-                    docker push $NGINX_IMG
-                    docker tag $NGINX_IMG hadil01/webform-nginx:latest
-                    docker push hadil01/webform-nginx:latest
-                '''
-            }
-        }
-
-        stage('ArgoCD Sync') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
+                withCredentials([usernamePassword(
+                    credentialsId: 'argocd-jenkins-creds',
+                    usernameVariable: 'ARGOCD_USER',
+                    passwordVariable: 'ARGOCD_PASS'
+                )]) {
                     sh '''
+                        echo "🔧 Installing ArgoCD CLI..."
                         apt-get update -y && apt-get install -y curl
                         curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                         chmod +x /usr/local/bin/argocd
 
-                        argocd login argocd-server.argocd.svc.cluster.local:443 \
-                            --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
+                        echo "🔐 Logging in to ArgoCD..."
+                        argocd login $ARGOCD_SERVER \
+                            --username $ARGOCD_USER \
+                            --password $ARGOCD_PASS \
+                            --insecure
 
-                        argocd app set webform --helm-set phpImage=$PHP_IMG --helm-set nginxImage=$NGINX_IMG
-
+                        echo "🚀 Syncing application in ArgoCD..."
                         n=0
                         until [ "$n" -ge 5 ]
                         do
-                            argocd app sync webform && break
-                            echo "Sync failed, retrying..."
-                            n=$((n+1))
-                            sleep 10
+                          argocd app sync $ARGOCD_APP_NAME && break
+                          echo "Sync failed (maybe operation in progress), retrying in 10 seconds..."
+                          n=$((n+1))
+                          sleep 10
                         done
+
+                        echo "✅ Deployment synced via ArgoCD!"
                     '''
                 }
             }
@@ -74,7 +84,12 @@ pipeline {
     }
 
     post {
-        success { echo "✅ Build & deployment successful!" }
-        failure { echo "❌ Build failed!" }
+        success {
+            echo "🎉 Deployment successful via Argo CD!"
+            echo "✅ Docker images pushed: PHP=$PHP_IMAGE, Nginx=$NGINX_IMAGE"
+        }
+        failure {
+            echo "❌ Pipeline failed!"
+        }
     }
 }
