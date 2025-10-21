@@ -5,3 +5,9 @@ kubernetes/
 docker/nginx/
 *.md
 *.log
+
+
+jenkins_home.backup.*
+.git
+node_modules
+*.log

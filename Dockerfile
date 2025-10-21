@@ -1,29 +1,29 @@
-FROM php:8.1-fpm
+# Dockerfile
+FROM jenkins/jenkins:lts-jdk11
 
-# Install system dependencies
+# Disable setup wizard
+ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
+
+# Switch to root to install dependencies
+USER root
+
+# Install dependencies
 RUN apt-get update && apt-get install -y \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
-    zip \
-    unzip \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions
-RUN docker-php-ext-install mysqli pdo pdo_mysql mbstring exif pcntl bcmath gd
+# Install Kaniko executor
+RUN mkdir -p /kaniko \
+    && curl -sSL -o /kaniko/executor \
+       https://github.com/GoogleContainerTools/kaniko/releases/latest/download/executor \
+    && chmod +x /kaniko/executor
 
-# Copy application files
-COPY src/ /var/www/html/
+# Switch back to Jenkins user
+USER jenkins
 
-# Set proper permissions
-RUN chown -R www-data:www-data /var/www/html \
-    && chmod -R 755 /var/www/html
+# Expose ports
+EXPOSE 8080 50000
 
-# ADD THIS LINE FOR PHP-FPM SOCKETS
-RUN mkdir -p /var/run/php
-
-EXPOSE 9000
-
-CMD ["php-fpm"]
+# Start Jenkins
+CMD ["jenkins"]
