@@ -1,107 +1,129 @@
 pipeline {
-    agent any
+    agent {
+        kubernetes {
+            defaultContainer 'docker'
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: docker
+      image: docker:24.0.6-dind
+      securityContext:
+        privileged: true
+      args: ["--host=tcp://0.0.0.0:2375"]
+      env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+      volumeMounts:
+        - name: docker-graph-storage
+          mountPath: /var/lib/docker
+        - name: docker-socket
+          mountPath: /var/run
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+          readOnly: false
+    - name: jnlp
+      image: fahadfadhi/jenkins-agent-docker:latest
+      tty: true
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+        - name: docker-socket
+          mountPath: /var/run
+  volumes:
+    - name: docker-socket
+      emptyDir: {}
+    - name: docker-graph-storage
+      emptyDir: {}
+    - name: workspace-volume
+      emptyDir: {}
+"""
+        }
+    }
 
     environment {
-        DOCKERHUB_USERNAME = "hadil01"
-        PHP_IMAGE = "hadil01/webform-php:${env.BUILD_NUMBER}"
-        NGINX_IMAGE = "hadil01/webform-nginx:${env.BUILD_NUMBER}"
-        KUBE_NAMESPACE = "webform"
-        HELM_CHART_PATH = "kubernetes/chart"
-        ARGOCD_APP_NAME = "webform"
-        ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        PHP_IMG = "hadil01/webform-php:${IMAGE_TAG}"
+        NGINX_IMG = "hadil01/webform-nginx:${IMAGE_TAG}"
+        DOCKERHUB_CREDS = 'dockerhub-pass'  // your DockerHub Jenkins credential
     }
 
     stages {
-        stage('📥 Checkout Code') {
+        stage('Checkout Code') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'github-creds',
-                    usernameVariable: 'GIT_USER',
-                    passwordVariable: 'GIT_PASS'
-                )]) {
+                checkout scm
+            }
+        }
+
+        stage('Docker Login') {
+            steps {
+                container('docker') {
+                    withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Build & Push PHP Image') {
+            steps {
+                container('docker') {
                     sh '''
-                        git clone https://$GIT_USER:$GIT_PASS@github.com/mhadiltt/webform.git
-                        cd webform
-                        git pull origin main
+                        docker build -t $PHP_IMG -f Dockerfile .
+                        docker push $PHP_IMG
+                        docker tag $PHP_IMG hadil01/webform-php:latest
+                        docker push hadil01/webform-php:latest
                     '''
                 }
             }
         }
 
-        stage('🏗️ Build & Push Images with Kaniko') {
+        stage('Build & Push NGINX Image') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-pass',
-                    usernameVariable: 'DOCKERHUB_USER',
-                    passwordVariable: 'DOCKERHUB_PASS'
-                )]) {
+                container('docker') {
                     sh '''
-                        echo "Building PHP image with Kaniko..."
-                        /kaniko/executor \
-                          --dockerfile=/workspace/Dockerfile \
-                          --context=/workspace \
-                          --destination=$PHP_IMAGE \
-                          --verbosity=info \
-                          --skip-tls-verify
-
-                        echo "Tagging and pushing Nginx image with Kaniko..."
-                        cp /workspace/nginx/Dockerfile /workspace/
-                        /kaniko/executor \
-                          --dockerfile=/workspace/Dockerfile \
-                          --context=/workspace \
-                          --destination=$NGINX_IMAGE \
-                          --verbosity=info \
-                          --skip-tls-verify
-
-                        echo "✅ Images built and pushed via Kaniko"
+                        docker build -t $NGINX_IMG -f nginx/Dockerfile nginx
+                        docker push $NGINX_IMG
+                        docker tag $NGINX_IMG hadil01/webform-nginx:latest
+                        docker push hadil01/webform-nginx:latest
                     '''
                 }
             }
         }
 
-        stage('🚀 Deploy via Argo CD') {
+        stage('ArgoCD Sync') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'argocd-jenkins-creds',
-                    usernameVariable: 'ARGOCD_USER',
-                    passwordVariable: 'ARGOCD_PASS'
-                )]) {
-                    sh '''
-                        echo "🔧 Installing ArgoCD CLI..."
-                        apt-get update -y && apt-get install -y curl
-                        curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-                        chmod +x /usr/local/bin/argocd
+                container('docker') {
+                    withCredentials([usernamePassword(credentialsId: 'argocd-jenkins-creds', usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
+                        sh '''
+                            apk add --no-cache curl
+                            curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+                            chmod +x /usr/local/bin/argocd
 
-                        echo "🔐 Logging in to ArgoCD..."
-                        argocd login $ARGOCD_SERVER \
-                            --username $ARGOCD_USER \
-                            --password $ARGOCD_PASS \
-                            --insecure
+                            argocd login argocd-server.argocd.svc.cluster.local:443 \
+                                --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
-                        echo "🚀 Syncing application in ArgoCD..."
-                        n=0
-                        until [ "$n" -ge 5 ]
-                        do
-                          argocd app sync $ARGOCD_APP_NAME && break
-                          echo "Sync failed (maybe operation in progress), retrying in 10 seconds..."
-                          n=$((n+1))
-                          sleep 10
-                        done
-
-                        echo "✅ Deployment synced via ArgoCD!"
-                    '''
+                            argocd app set webform --helm-set phpImage=$PHP_IMG --helm-set nginxImage=$NGINX_IMG
+                            n=0
+                            until [ "$n" -ge 5 ]
+                            do
+                              argocd app sync webform && break
+                              echo "Sync failed, retrying..."
+                              n=$((n+1))
+                              sleep 10
+                            done
+                        '''
+                    }
                 }
             }
         }
     }
 
     post {
-        success {
-            echo "🎉 Deployment successful via Argo CD!"
-            echo "✅ Docker images pushed: PHP=$PHP_IMAGE, Nginx=$NGINX_IMAGE"
-        }
-        failure {
-            echo "❌ Pipeline failed!"
-        }
+        success { echo "✅ Build and deployment successful!" }
+        failure { echo "❌ Build failed!" }
     }
 }
