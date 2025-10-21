@@ -1,8 +1,8 @@
 pipeline {
     agent {
         kubernetes {
-            inheritFrom 'jenkins-agent'    // Name of your Pod Template
-            defaultContainer 'jnlp'        // The container that runs the Jenkins agent
+            inheritFrom 'jenkins-agent'       // Pod Template name
+            defaultContainer 'jnlp'           // Container that runs the Jenkins agent
         }
     }
 
@@ -26,7 +26,7 @@ pipeline {
 
         stage('Docker Login') {
             steps {
-                container('docker') {
+                container('docker') {               // Make sure 'docker' container exists in your Pod Template
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
                     }
