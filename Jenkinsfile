@@ -1,7 +1,7 @@
 pipeline {
     agent {
         kubernetes {
-            inheritFrom 'jenkins-agent'       // Pod Template name
+            inheritFrom 'jenkins-agent'       // Pod Template name in Jenkins
             defaultContainer 'jnlp'           // Container that runs the Jenkins agent
         }
     }
@@ -26,7 +26,7 @@ pipeline {
 
         stage('Docker Login') {
             steps {
-                container('docker') {               // Make sure 'docker' container exists in your Pod Template
+                container('jnlp') { // Using the default 'jnlp' container
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
                     }
@@ -36,7 +36,7 @@ pipeline {
 
         stage('Build & Push PHP Image') {
             steps {
-                container('docker') {
+                container('jnlp') {
                     sh '''
                         docker build -t $PHP_IMAGE -f Dockerfile .
                         docker push $PHP_IMAGE
@@ -49,7 +49,7 @@ pipeline {
 
         stage('Build & Push NGINX Image') {
             steps {
-                container('docker') {
+                container('jnlp') {
                     sh '''
                         docker build -t $NGINX_IMAGE -f nginx/Dockerfile nginx
                         docker push $NGINX_IMAGE
@@ -62,7 +62,7 @@ pipeline {
 
         stage('ArgoCD Sync') {
             steps {
-                container('docker') {
+                container('jnlp') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
                             apt-get update -y && apt-get install -y curl
@@ -71,6 +71,7 @@ pipeline {
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
 
+                            # Retry sync up to 5 times
                             n=0
                             until [ "$n" -ge 5 ]
                             do
