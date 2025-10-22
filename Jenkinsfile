@@ -1,8 +1,38 @@
 pipeline {
     agent {
         kubernetes {
-            inheritFrom 'jenkins-agent'       // Pod Template name in Jenkins
-            defaultContainer 'jnlp'           // Container that runs the Jenkins agent
+            label 'jenkins-k8s-agent'
+            defaultContainer 'jnlp'
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: slave
+spec:
+  containers:
+  - name: jnlp
+    image: docker:24.0.6-dind
+    securityContext:
+      privileged: true
+    tty: true
+    command:
+    - cat
+    volumeMounts:
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+  - name: tools
+    image: alpine:latest
+    command:
+    - cat
+    tty: true
+    securityContext:
+      privileged: true
+  volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+"""
         }
     }
 
@@ -26,9 +56,12 @@ pipeline {
 
         stage('Docker Login') {
             steps {
-                container('jnlp') { // Using the default 'jnlp' container
+                container('jnlp') {
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                        sh '''
+                            apk add --no-cache curl git
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        '''
                     }
                 }
             }
@@ -65,13 +98,13 @@ pipeline {
                 container('jnlp') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            apt-get update -y && apt-get install -y curl
+                            apk add --no-cache curl bash
                             curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                             chmod +x /usr/local/bin/argocd
+
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
 
-                            # Retry sync up to 5 times
                             n=0
                             until [ "$n" -ge 5 ]
                             do
