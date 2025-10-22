@@ -20,6 +20,10 @@ spec:
     volumeMounts:
     - name: docker-sock
       mountPath: /var/run/docker.sock
+  - name: argocd
+    image: quay.io/argoproj/argocd-cli:v2.9.10  # pre-installed ArgoCD CLI
+    command: ["sleep", "infinity"]
+    tty: true
   volumes:
   - name: docker-sock
     hostPath:
@@ -83,14 +87,9 @@ spec:
 
         stage('ArgoCD Sync') {
             steps {
-                container('docker') { // use your existing docker container
+                container('argocd') { // use the pre-installed ArgoCD CLI container
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            # install argocd CLI at runtime
-                            apk add --no-cache curl bash
-                            curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-                            chmod +x /usr/local/bin/argocd
-
                             # login to existing ArgoCD server
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
