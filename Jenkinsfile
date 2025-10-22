@@ -21,7 +21,7 @@ spec:
     - name: docker-sock
       mountPath: /var/run/docker.sock
   - name: argocd
-    image: quay.io/argoproj/argocd-cli:v2.9.10  # pre-installed ArgoCD CLI
+    image: argoproj/argocd-cli:v2.9.10  # Permanent fix: Docker Hub image
     command: ["sleep", "infinity"]
     tty: true
   volumes:
@@ -87,7 +87,7 @@ spec:
 
         stage('ArgoCD Sync') {
             steps {
-                container('argocd') { // use the pre-installed ArgoCD CLI container
+                container('argocd') { // Use pre-installed ArgoCD CLI container
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
                             # login to existing ArgoCD server
