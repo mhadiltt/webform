@@ -21,7 +21,7 @@ spec:
     - name: docker-sock
       mountPath: /var/run/docker.sock
   - name: argocd
-    image: argoproj/argocd-cli:v2.9.10  # Permanent fix: Docker Hub image
+    image: argoproj/argocd:v2.9.10  
     command: ["sleep", "infinity"]
     tty: true
   volumes:
