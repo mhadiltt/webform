@@ -2,7 +2,6 @@ pipeline {
     agent {
         kubernetes {
             label 'jenkins-k8s-agent'
-            defaultContainer 'jnlp'
             yaml """
 apiVersion: v1
 kind: Pod
@@ -11,11 +10,8 @@ metadata:
     jenkins: slave
 spec:
   containers:
-  - name: jnlp
+  - name: docker
     image: docker:24.0.6-dind
-    securityContext:
-      privileged: true
-    tty: true
     command:
     - cat
     volumeMounts:
@@ -56,7 +52,7 @@ spec:
 
         stage('Docker Login') {
             steps {
-                container('jnlp') {
+                container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
                             apk add --no-cache curl git
