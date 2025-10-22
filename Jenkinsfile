@@ -21,7 +21,7 @@ spec:
     - name: docker-sock
       mountPath: /var/run/docker.sock
   - name: argocd
-    image: argoproj/argocd:v2.9.10  
+    image: quay.io/argoproj/argocd-cli:v2.9.10  # Permanent fix: explicit quay.io
     command: ["sleep", "infinity"]
     tty: true
   volumes:
