@@ -2,6 +2,7 @@ pipeline {
     agent {
         kubernetes {
             label 'jenkins-k8s-agent'
+            defaultContainer 'jnlp'
             yaml """
 apiVersion: v1
 kind: Pod
@@ -12,16 +13,16 @@ spec:
   containers:
   - name: docker
     image: docker:24.0.6
-    command:
-    - cat
+    command: ["sleep", "infinity"]
     tty: true
+    securityContext:
+      privileged: true
     volumeMounts:
-      - name: docker-sock
-        mountPath: /var/run/docker.sock
+    - name: docker-sock
+      mountPath: /var/run/docker.sock
   - name: argocd
-    image: alpine:3.18
-    command:
-    - cat
+    image: quay.io/argoproj/argocd-cli:latest
+    command: ["sleep", "infinity"]
     tty: true
   volumes:
   - name: docker-sock
@@ -30,6 +31,7 @@ spec:
 """
         }
     }
+
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         PHP_IMAGE = "hadil01/webform-php:${IMAGE_TAG}"
@@ -39,23 +41,24 @@ spec:
         ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
         ARGOCD_APP_NAME = "webform"
     }
+
     stages {
         stage('📥 Checkout Code') {
             steps {
                 git credentialsId: 'github-creds', url: 'https://github.com/mhadiltt/webform.git', branch: 'main'
             }
         }
+
         stage('Docker Login') {
             steps {
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh '''
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        '''
+                        sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
                     }
                 }
             }
         }
+
         stage('Build & Push PHP Image') {
             steps {
                 container('docker') {
@@ -68,6 +71,7 @@ spec:
                 }
             }
         }
+
         stage('Build & Push NGINX Image') {
             steps {
                 container('docker') {
@@ -80,23 +84,21 @@ spec:
                 }
             }
         }
+
         stage('ArgoCD Sync') {
             steps {
                 container('argocd') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            apk add --no-cache curl bash
-                            curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-                            chmod +x /usr/local/bin/argocd
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
                             n=0
                             until [ "$n" -ge 5 ]
                             do
-                              argocd app sync $ARGOCD_APP_NAME && break
-                              echo "Sync failed, retrying..."
-                              n=$((n+1))
-                              sleep 10
+                                argocd app sync $ARGOCD_APP_NAME && break
+                                echo "Sync failed, retrying..."
+                                n=$((n+1))
+                                sleep 10
                             done
                         '''
                     }
@@ -104,6 +106,7 @@ spec:
             }
         }
     }
+
     post {
         success {
             echo "✅ Build & deployment successful!"
