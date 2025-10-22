@@ -19,14 +19,6 @@ pipeline {
             }
         }
 
-        stage('📥 tes') {
-            steps {
-                sh "sleep 10"
-                sh "apt install nano"
-                
-            }
-        }
-
         stage('Docker Login') {
             steps {
                 container('jnlp') { // Using the default 'jnlp' container
