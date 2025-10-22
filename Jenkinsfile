@@ -11,11 +11,18 @@ metadata:
 spec:
   containers:
   - name: docker
-    image: docker:24.0.6-dind
+    image: docker:24.0.6
     command:
+    - cat
+    tty: true
     volumeMounts:
       - name: docker-sock
         mountPath: /var/run/docker.sock
+  - name: argocd
+    image: alpine:3.18
+    command:
+    - cat
+    tty: true
   volumes:
   - name: docker-sock
     hostPath:
@@ -23,7 +30,6 @@ spec:
 """
         }
     }
-
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         PHP_IMAGE = "hadil01/webform-php:${IMAGE_TAG}"
@@ -33,31 +39,26 @@ spec:
         ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
         ARGOCD_APP_NAME = "webform"
     }
-
     stages {
-
         stage('📥 Checkout Code') {
             steps {
                 git credentialsId: 'github-creds', url: 'https://github.com/mhadiltt/webform.git', branch: 'main'
             }
         }
-
         stage('Docker Login') {
             steps {
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
-                            apk add --no-cache curl git
                             echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         '''
                     }
                 }
             }
         }
-
         stage('Build & Push PHP Image') {
             steps {
-                container('jnlp') {
+                container('docker') {
                     sh '''
                         docker build -t $PHP_IMAGE -f Dockerfile .
                         docker push $PHP_IMAGE
@@ -67,10 +68,9 @@ spec:
                 }
             }
         }
-
         stage('Build & Push NGINX Image') {
             steps {
-                container('jnlp') {
+                container('docker') {
                     sh '''
                         docker build -t $NGINX_IMAGE -f nginx/Dockerfile nginx
                         docker push $NGINX_IMAGE
@@ -80,19 +80,16 @@ spec:
                 }
             }
         }
-
         stage('ArgoCD Sync') {
             steps {
-                container('jnlp') {
+                container('argocd') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
                             apk add --no-cache curl bash
                             curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                             chmod +x /usr/local/bin/argocd
-
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
-
                             n=0
                             until [ "$n" -ge 5 ]
                             do
@@ -107,7 +104,6 @@ spec:
             }
         }
     }
-
     post {
         success {
             echo "✅ Build & deployment successful!"
