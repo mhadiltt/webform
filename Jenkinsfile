@@ -2,7 +2,7 @@ pipeline {
     agent {
         kubernetes {
             label 'jenkins-k8s-agent'
-            defaultContainer 'jnlp'
+            defaultContainer 'docker'
             yaml """
 apiVersion: v1
 kind: Pod
@@ -20,10 +20,6 @@ spec:
     volumeMounts:
     - name: docker-sock
       mountPath: /var/run/docker.sock
-  - name: argocd
-    image: quay.io/argoproj/argocd-cli:latest
-    command: ["sleep", "infinity"]
-    tty: true
   volumes:
   - name: docker-sock
     hostPath:
@@ -87,18 +83,26 @@ spec:
 
         stage('ArgoCD Sync') {
             steps {
-                container('argocd') {
+                container('docker') { // use your existing docker container
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
+                            # install argocd CLI at runtime
+                            apk add --no-cache curl bash
+                            curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+                            chmod +x /usr/local/bin/argocd
+
+                            # login to existing ArgoCD server
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
+
+                            # sync with retry
                             n=0
                             until [ "$n" -ge 5 ]
                             do
-                                argocd app sync $ARGOCD_APP_NAME && break
-                                echo "Sync failed, retrying..."
-                                n=$((n+1))
-                                sleep 10
+                              argocd app sync $ARGOCD_APP_NAME && break
+                              echo "Sync failed, retrying..."
+                              n=$((n+1))
+                              sleep 10
                             done
                         '''
                     }
