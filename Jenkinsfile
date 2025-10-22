@@ -19,6 +19,12 @@ pipeline {
             }
         }
 
+        stage('📥 tes') {
+            steps {
+                sh "sleep 10"
+            }
+        }
+
         stage('Docker Login') {
             steps {
                 container('jnlp') { // Using the default 'jnlp' container
