@@ -1,10 +1,5 @@
 pipeline {
-    agent {
-        kubernetes {
-            inheritFrom 'jenkins-agent'       // Pod Template name in Jenkins
-            defaultContainer 'jnlp'           // Container that runs the Jenkins agent
-        }
-    }
+    agent any
 
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
