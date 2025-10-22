@@ -1,5 +1,40 @@
 pipeline {
-    agent any
+    agent {
+        kubernetes {
+            label 'jenkins-k8s-agent'
+            defaultContainer 'jnlp'
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: slave
+spec:
+  containers:
+  - name: jnlp
+    image: docker:24.0.6-dind
+    securityContext:
+      privileged: true
+    tty: true
+    command:
+    - cat
+    volumeMounts:
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+  - name: tools
+    image: alpine:latest
+    command:
+    - cat
+    tty: true
+    securityContext:
+      privileged: true
+  volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+"""
+        }
+    }
 
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
