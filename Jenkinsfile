@@ -22,6 +22,8 @@ pipeline {
         stage('📥 tes') {
             steps {
                 sh "sleep 10"
+                sh "apt install nano"
+                
             }
         }
 
