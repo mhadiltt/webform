@@ -13,17 +13,9 @@ spec:
   - name: docker
     image: docker:24.0.6-dind
     command:
-    - cat
     volumeMounts:
       - name: docker-sock
         mountPath: /var/run/docker.sock
-  - name: tools
-    image: alpine:latest
-    command:
-    - cat
-    tty: true
-    securityContext:
-      privileged: true
   volumes:
   - name: docker-sock
     hostPath:
