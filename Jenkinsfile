@@ -97,7 +97,8 @@ spec:
                 sh '''
                     set -e
                     # <-- changed context to docker/nginx
-                    docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
+                    cd docker/nginx
+                    docker build -t $NGINX_IMAGE -f Dockerfile .
                     docker push $NGINX_IMAGE
                     docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
                     docker push hadil01/webform-nginx:latest
