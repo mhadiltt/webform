@@ -20,7 +20,6 @@ spec:
       env:
         - name: DOCKER_TLS_CERTDIR
           value: ""
-      # dockerd will create the socket in /var/run inside the pod; share that directory with other containers
       volumeMounts:
         - name: docker-graph-storage
           mountPath: /var/lib/docker
@@ -30,9 +29,11 @@ spec:
           mountPath: /home/jenkins/agent
           readOnly: false
     - name: jnlp
-      # pin a stable inbound-agent version; avoid 'latest' to reduce surprises
-      image: jenkins/inbound-agent:4.11-4
+      # Use a stable tag or 'latest' if you cannot pull a specific tag.
+      # If your environment blocks Docker Hub, pre-pull this image on nodes or point to a local registry.
+      image: jenkins/inbound-agent:latest
       imagePullPolicy: IfNotPresent
+      tty: true
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
@@ -107,20 +108,16 @@ spec:
 
         stage('🚀 ArgoCD Sync') {
             steps {
-                // we run the argocd CLI inside the docker container to reuse the same pod and shared network
+                // run the argocd CLI inside the docker container
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            # install small deps and argocd CLI
-                            # docker image is based on alpine; install curl
-                            apk add --no-cache curl ca-certificates
+                            apk add --no-cache curl ca-certificates || true
                             curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                             chmod +x /usr/local/bin/argocd
 
-                            # login to argocd
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
-                            # update helm values and sync
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
 
                             n=0
