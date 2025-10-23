@@ -1,13 +1,16 @@
 jenkins_home/
+jenkins_home.backup.*
+
+# repo metadata
 .git/
 .github/
+
+# Kubernetes manifests we don't want in docker context
 kubernetes/
-docker/nginx/
-*.md
-*.log
 
-
-jenkins_home.backup.*
-.git
+# Typical node/npm ignore
 node_modules
+
+# Docs and logs we don't want in image build context
+*.md
 *.log
