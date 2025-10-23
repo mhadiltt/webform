@@ -1,13 +1,13 @@
 pipeline {
     agent {
         kubernetes {
+            // jenkins inbound (jnlp) is required by the plugin; pipeline steps run in specific containers
             defaultContainer 'jnlp'
             yaml """
 apiVersion: v1
 kind: Pod
 spec:
-  # If you store images in a private/local registry, create an imagePullSecret named "regcred"
-  # and uncomment the imagePullSecrets block below.
+  # If your registry requires credentials create regcred and uncomment imagePullSecrets
   # imagePullSecrets:
   #   - name: regcred
 
@@ -15,35 +15,26 @@ spec:
     runAsUser: 0
 
   containers:
-    - name: docker
-      image: docker:24.0.6-dind
+    - name: kaniko
+      # use the official kaniko executor image. You can mirror this to your local registry if needed.
+      image: gcr.io/kaniko-project/executor:latest
       imagePullPolicy: IfNotPresent
-      securityContext:
-        privileged: true              
-      env:
-        - name: DOCKER_TLS_CERTDIR
-          value: ""
       volumeMounts:
-        - name: docker-graph-storage
-          mountPath: /var/lib/docker
-        - name: docker-socket
-          mountPath: /var/run
+        - name: kaniko-secret
+          mountPath: /kaniko/.docker
         - name: workspace-volume
-          mountPath: /home/jenkins/agent
-          readOnly: false
+          mountPath: /workspace
 
     - name: argocd
-      # Put here the image that contains the argocd CLI binary (push it to your registry first if needed).
-      # Example: my-registry:32000/hadil01/argocd-cli:latest
-      image: hadil01/argocd-cli:latest
+      # This must point to the image you will push to your local registry
+      image: 192.168.68.136:32000/hadil01/argocd-cli:latest
       imagePullPolicy: IfNotPresent
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
 
     - name: jnlp
-      # Use a stable, existing inbound-agent tag; 'latest' is OK, or use a known-good numeric tag.
-      image: jenkins/inbound-agent:latest
+      image: 192.168.68.136:32000/jenkins/inbound-agent:latest
       imagePullPolicy: IfNotPresent
       tty: true
       volumeMounts:
@@ -51,10 +42,9 @@ spec:
           mountPath: /home/jenkins/agent
 
   volumes:
-    - name: docker-socket
-      emptyDir: {}
-    - name: docker-graph-storage
-      emptyDir: {}
+    - name: kaniko-secret
+      secret:
+        secretName: regcred-kaniko
     - name: workspace-volume
       emptyDir: {}
 """
@@ -63,86 +53,80 @@ spec:
 
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
-        PHP_IMAGE = "hadil01/webform-php:${IMAGE_TAG}"
-        NGINX_IMAGE = "hadil01/webform-nginx:${IMAGE_TAG}"
-        DOCKERHUB_CREDS = 'dockerhub-pass'
+        PHP_IMAGE = "192.168.68.136:32000/hadil01/webform-php:${IMAGE_TAG}"
+        NGINX_IMAGE = "192.168.68.136:32000/hadil01/webform-nginx:${IMAGE_TAG}"
+        PHP_LATEST = "192.168.68.136:32000/hadil01/webform-php:latest"
+        NGINX_LATEST = "192.168.68.136:32000/hadil01/webform-nginx:latest"
+        DOCKERHUB_CREDS = 'dockerhub-pass'                // optional if you push to Docker Hub
         ARGOCD_CREDS = 'argocd-jenkins-creds'
         ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
         ARGOCD_APP_NAME = "webform"
     }
 
     stages {
-        stage('📥 Checkout Code') {
-            steps {
-                checkout scm
-            }
+        stage('Checkout') {
+            steps { checkout scm }
         }
 
-        stage('🔐 Docker Login') {
+        stage('Build & Push PHP (kaniko)') {
             steps {
-                container('docker') {
-                    withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh '''
-                            set -e
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage('🐘 Build & Push PHP Image') {
-            steps {
-                container('docker') {
+                container('kaniko') {
+                    // kaniko expects a config at /kaniko/.docker/config.json
+                    // it will read the Docker credentials from the mounted secret
                     sh '''
-                        set -e
-                        docker build -t $PHP_IMAGE -f Dockerfile .
-                        docker push $PHP_IMAGE
-                        docker tag $PHP_IMAGE hadil01/webform-php:latest
-                        docker push hadil01/webform-php:latest
+                      set -e
+                      # copy repo into workspace path
+                      cp -r /home/jenkins/agent/* /workspace || true
+                      # build and push using kaniko
+                      /kaniko/executor \
+                        --context ${WORKSPACE} \
+                        --dockerfile ${WORKSPACE}/Dockerfile \
+                        --destination ${PHP_IMAGE} \
+                        --destination ${PHP_LATEST} \
+                        --verbosity info
                     '''
                 }
             }
         }
 
-        stage('🌐 Build & Push NGINX Image') {
+        stage('Build & Push NGINX (kaniko)') {
             steps {
-                container('docker') {
+                container('kaniko') {
                     sh '''
-                        set -e
-                        docker build -t $NGINX_IMAGE -f nginx/Dockerfile nginx
-                        docker push $NGINX_IMAGE
-                        docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
-                        docker push hadil01/webform-nginx:latest
+                      set -e
+                      # context points to nginx folder
+                      /kaniko/executor \
+                        --context ${WORKSPACE}/nginx \
+                        --dockerfile ${WORKSPACE}/nginx/Dockerfile \
+                        --destination ${NGINX_IMAGE} \
+                        --destination ${NGINX_LATEST} \
+                        --verbosity info
                     '''
                 }
             }
         }
 
-        stage('🚀 ArgoCD Sync') {
+        stage('Argocd sync') {
             steps {
                 container('argocd') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            set -e
+                          set -e
+                          if ! command -v argocd >/dev/null 2>&1; then
+                            echo "argocd CLI not found in the image"
+                            exit 1
+                          fi
 
-                            if ! command -v argocd >/dev/null 2>&1; then
-                              echo "argocd CLI not found in the image: ensure your hadil01/argocd-cli image contains the argocd binary"
-                              exit 1
-                            fi
-
-                            argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
-
-                            argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
-
-                            n=0
-                            until [ "$n" -ge 5 ]
-                            do
-                              argocd app sync $ARGOCD_APP_NAME && break
-                              echo "Sync failed, retrying..."
-                              n=$((n+1))
-                              sleep 10
-                            done
+                          argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
+                          argocd app set $ARGOCD_APP_NAME --helm-set phpImage=${PHP_IMAGE} --helm-set nginxImage=${NGINX_IMAGE}
+                          n=0
+                          until [ "$n" -ge 5 ]
+                          do
+                            argocd app sync $ARGOCD_APP_NAME && break
+                            echo "Sync failed, retrying..."
+                            n=$((n+1))
+                            sleep 10
+                          done
                         '''
                     }
                 }
@@ -151,11 +135,7 @@ spec:
     }
 
     post {
-        success {
-            echo "✅ Build & deployment successful!"
-        }
-        failure {
-            echo "❌ Pipeline failed!"
-        }
+        success { echo "✅ Pipeline finished" }
+        failure { echo "❌ Pipeline failed" }
     }
 }
