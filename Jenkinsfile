@@ -1,4 +1,4 @@
-pipeline {
+    pipeline {
     agent {
         kubernetes {
             // run pipeline steps by default in the 'docker' container
@@ -96,8 +96,7 @@ spec:
             steps {
                 sh '''
                     set -e
-                    # <-- changed context to docker/nginx
-                   
+                    # Build with repository root as context so Dockerfile can COPY src and docker/nginx/nginx.conf
                     docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
                     docker push $NGINX_IMAGE
                     docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
@@ -106,6 +105,8 @@ spec:
             }
         }
 
+
+        
         stage('🚀 ArgoCD Sync') {
             steps {
                 container('argocd') {
