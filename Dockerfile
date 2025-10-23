@@ -27,3 +27,16 @@ EXPOSE 8080 50000
 
 # Start Jenkins
 CMD ["jenkins"]
+
+
+
+FROM alpine:3.18
+
+# Minimal image with argocd CLI
+RUN apk add --no-cache ca-certificates curl \
+ && curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64 \
+ && chmod +x /usr/local/bin/argocd \
+ && apk del curl
+
+ENTRYPOINT ["/bin/sh", "-c"]
+CMD ["while true; do sleep 3600; done"]
