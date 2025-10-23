@@ -1,33 +1,43 @@
 pipeline {
     agent {
         kubernetes {
-            label 'jenkins-k8s-agent'
             defaultContainer 'docker'
             yaml """
 apiVersion: v1
 kind: Pod
-metadata:
-  labels:
-    jenkins: slave
 spec:
   containers:
-  - name: docker
-    image: docker:24.0.6
-    command: ["sleep", "infinity"]
-    tty: true
-    securityContext:
-      privileged: true
-    volumeMounts:
-    - name: docker-sock
-      mountPath: /var/run/docker.sock
-  - name: argocd
-    image: quay.io/argoproj/argocd-cli:v2.9.10  # Permanent fix: explicit quay.io
-    command: ["sleep", "infinity"]
-    tty: true
+    - name: docker
+      image: docker:24.0.6-dind
+      securityContext:
+        privileged: true
+      args: ["--host=tcp://0.0.0.0:2375"]
+      env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+      volumeMounts:
+        - name: docker-graph-storage
+          mountPath: /var/lib/docker
+        - name: docker-socket
+          mountPath: /var/run
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+          readOnly: false
+    - name: jnlp
+      image: jenkins/inbound-agent:latest
+      tty: true
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+        - name: docker-socket
+          mountPath: /var/run
   volumes:
-  - name: docker-sock
-    hostPath:
-      path: /var/run/docker.sock
+    - name: docker-socket
+      emptyDir: {}
+    - name: docker-graph-storage
+      emptyDir: {}
+    - name: workspace-volume
+      emptyDir: {}
 """
         }
     }
@@ -45,21 +55,23 @@ spec:
     stages {
         stage('📥 Checkout Code') {
             steps {
-                git credentialsId: 'github-creds', url: 'https://github.com/mhadiltt/webform.git', branch: 'main'
+                checkout scm
             }
         }
 
-        stage('Docker Login') {
+        stage('🔐 Docker Login') {
             steps {
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                        sh '''
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        '''
                     }
                 }
             }
         }
 
-        stage('Build & Push PHP Image') {
+        stage('🐘 Build & Push PHP Image') {
             steps {
                 container('docker') {
                     sh '''
@@ -72,7 +84,7 @@ spec:
             }
         }
 
-        stage('Build & Push NGINX Image') {
+        stage('🌐 Build & Push NGINX Image') {
             steps {
                 container('docker') {
                     sh '''
@@ -85,16 +97,23 @@ spec:
             }
         }
 
-        stage('ArgoCD Sync') {
+        stage('🚀 ArgoCD Sync') {
             steps {
-                container('argocd') { // Use pre-installed ArgoCD CLI container
+                container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            # login to existing ArgoCD server
+                            # Install ArgoCD CLI inside container
+                            apk add --no-cache curl
+                            curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+                            chmod +x /usr/local/bin/argocd
+
+                            # Login to ArgoCD
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
+
+                            # Update Helm images
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
 
-                            # sync with retry
+                            # Sync the app with retry logic
                             n=0
                             until [ "$n" -ge 5 ]
                             do
