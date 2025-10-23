@@ -1,4 +1,4 @@
- pipeline {
+pipeline {
     agent {
         kubernetes {
             // run pipeline steps by default in the 'docker' container
@@ -9,9 +9,6 @@ kind: Pod
 spec:
   securityContext:
     runAsUser: 0
-  # If you use a private registry, add imagePullSecrets here:
-  # imagePullSecrets:
-  #   - name: regcred
   containers:
     - name: docker
       image: docker:24.0.6-dind
@@ -38,9 +35,6 @@ spec:
           mountPath: /home/jenkins/agent
 
     - name: jnlp
-      # The Kubernetes plugin requires the inbound-agent container named 'jnlp'.
-      # You cannot remove/rename this container. It does not run your build steps,
-      # it only connects the pod back to the Jenkins controller.
       image: jenkins/inbound-agent:latest
       imagePullPolicy: IfNotPresent
       tty: true
@@ -77,7 +71,6 @@ spec:
 
         stage('🔐 Docker Login') {
             steps {
-                // defaultContainer is 'docker' so this runs inside docker:dind
                 withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
                         set -e
@@ -103,7 +96,8 @@ spec:
             steps {
                 sh '''
                     set -e
-                    docker build -t $NGINX_IMAGE -f nginx/Dockerfile nginx
+                    # <-- changed context to docker/nginx
+                    docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile docker/nginx
                     docker push $NGINX_IMAGE
                     docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
                     docker push hadil01/webform-nginx:latest
@@ -113,7 +107,6 @@ spec:
 
         stage('🚀 ArgoCD Sync') {
             steps {
-                // run argocd CLI in the argocd container
                 container('argocd') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
