@@ -1,22 +1,25 @@
 pipeline {
     agent {
         kubernetes {
-            // keep jnlp as the agent container name expected by the kubernetes plugin
             defaultContainer 'jnlp'
             yaml """
 apiVersion: v1
 kind: Pod
 spec:
-  # run as root so containers that need privileged access can start (adjust for your security policy)
+  # If you store images in a private/local registry, create an imagePullSecret named "regcred"
+  # and uncomment the imagePullSecrets block below.
+  # imagePullSecrets:
+  #   - name: regcred
+
   securityContext:
     runAsUser: 0
+
   containers:
     - name: docker
       image: docker:24.0.6-dind
       imagePullPolicy: IfNotPresent
-      # DinD requires privileged mode — your cluster must allow privileged pods
       securityContext:
-        privileged: true
+        privileged: true              
       env:
         - name: DOCKER_TLS_CERTDIR
           value: ""
@@ -28,17 +31,25 @@ spec:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
           readOnly: false
+
+    - name: argocd
+      # Put here the image that contains the argocd CLI binary (push it to your registry first if needed).
+      # Example: my-registry:32000/hadil01/argocd-cli:latest
+      image: hadil01/argocd-cli:latest
+      imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+
     - name: jnlp
-      # Use a stable tag or 'latest' if you cannot pull a specific tag.
-      # If your environment blocks Docker Hub, pre-pull this image on nodes or point to a local registry.
+      # Use a stable, existing inbound-agent tag; 'latest' is OK, or use a known-good numeric tag.
       image: jenkins/inbound-agent:latest
       imagePullPolicy: IfNotPresent
       tty: true
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-        - name: docker-socket
-          mountPath: /var/run
+
   volumes:
     - name: docker-socket
       emptyDir: {}
@@ -69,10 +80,10 @@ spec:
 
         stage('🔐 Docker Login') {
             steps {
-                // run docker cli inside the docker container (which runs dockerd)
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
+                            set -e
                             echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         '''
                     }
@@ -84,6 +95,7 @@ spec:
             steps {
                 container('docker') {
                     sh '''
+                        set -e
                         docker build -t $PHP_IMAGE -f Dockerfile .
                         docker push $PHP_IMAGE
                         docker tag $PHP_IMAGE hadil01/webform-php:latest
@@ -97,6 +109,7 @@ spec:
             steps {
                 container('docker') {
                     sh '''
+                        set -e
                         docker build -t $NGINX_IMAGE -f nginx/Dockerfile nginx
                         docker push $NGINX_IMAGE
                         docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
@@ -108,13 +121,15 @@ spec:
 
         stage('🚀 ArgoCD Sync') {
             steps {
-                // run the argocd CLI inside the docker container
-                container('docker') {
+                container('argocd') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            apk add --no-cache curl ca-certificates || true
-                            curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-                            chmod +x /usr/local/bin/argocd
+                            set -e
+
+                            if ! command -v argocd >/dev/null 2>&1; then
+                              echo "argocd CLI not found in the image: ensure your hadil01/argocd-cli image contains the argocd binary"
+                              exit 1
+                            fi
 
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
