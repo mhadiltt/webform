@@ -1,20 +1,26 @@
 pipeline {
     agent {
         kubernetes {
-            defaultContainer 'docker'
+            // keep jnlp as the agent container name expected by the kubernetes plugin
+            defaultContainer 'jnlp'
             yaml """
 apiVersion: v1
 kind: Pod
 spec:
+  # run as root so containers that need privileged access can start (adjust for your security policy)
+  securityContext:
+    runAsUser: 0
   containers:
     - name: docker
       image: docker:24.0.6-dind
+      imagePullPolicy: IfNotPresent
+      # DinD requires privileged mode — your cluster must allow privileged pods
       securityContext:
         privileged: true
-      args: ["--host=tcp://0.0.0.0:2375"]
       env:
         - name: DOCKER_TLS_CERTDIR
           value: ""
+      # dockerd will create the socket in /var/run inside the pod; share that directory with other containers
       volumeMounts:
         - name: docker-graph-storage
           mountPath: /var/lib/docker
@@ -24,8 +30,9 @@ spec:
           mountPath: /home/jenkins/agent
           readOnly: false
     - name: jnlp
-      image: jenkins/inbound-agent:latest
-      tty: true
+      # pin a stable inbound-agent version; avoid 'latest' to reduce surprises
+      image: jenkins/inbound-agent:4.11-4
+      imagePullPolicy: IfNotPresent
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
@@ -61,6 +68,7 @@ spec:
 
         stage('🔐 Docker Login') {
             steps {
+                // run docker cli inside the docker container (which runs dockerd)
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
@@ -99,21 +107,22 @@ spec:
 
         stage('🚀 ArgoCD Sync') {
             steps {
+                // we run the argocd CLI inside the docker container to reuse the same pod and shared network
                 container('docker') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            # Install ArgoCD CLI inside container
-                            apk add --no-cache curl
+                            # install small deps and argocd CLI
+                            # docker image is based on alpine; install curl
+                            apk add --no-cache curl ca-certificates
                             curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                             chmod +x /usr/local/bin/argocd
 
-                            # Login to ArgoCD
+                            # login to argocd
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
-                            # Update Helm images
+                            # update helm values and sync
                             argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
 
-                            # Sync the app with retry logic
                             n=0
                             until [ "$n" -ge 5 ]
                             do
