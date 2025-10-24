@@ -7,6 +7,7 @@ spec:
     app: webform-nginx
   ports:
     - protocol: TCP
-      port: 80
-      targetPort: 80
-  type: LoadBalancer
+      port: 80         # Service port
+      targetPort: 80   # Container port
+      nodePort: 30080  # Optional: specify NodePort (30000–32767)
+  type: NodePort
