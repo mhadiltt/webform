@@ -1,11 +1,9 @@
-# docker/nginx/Dockerfile - builds nginx image for webform
-FROM nginx:1.26-alpine
+FROM php:8.2-fpm
 
-# Use your repo nginx config (placed at docker/nginx/nginx.conf)
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /var/www/html
+COPY . .
 
-# Copy application files from the repository root src/ into the nginx html root
-COPY ../../src /usr/share/nginx/html
+RUN chown -R www-data:www-data /var/www/html
 
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+EXPOSE 9000
+CMD ["php-fpm"]
