@@ -19,10 +19,14 @@ spec:
           image: {{ .Values.nginx.image }}
           ports:
             - containerPort: {{ .Values.nginx.port }}
-          volumeMounts:
-            - name: nginx-config
-              mountPath: /etc/nginx/conf.d
-      volumes:
-        - name: nginx-config
-          configMap:
-            name: {{ .Values.nginx.configMapName }}
+   volumeMounts:
+          - name: nginx-config
+            mountPath: /etc/nginx/conf.d
+          - name: webform-code
+            mountPath: /var/www/html
+    volumes:
+      - name: nginx-config
+        configMap:
+          name: {{ .Values.nginx.configMapName }}
+      - name: webform-code
+        emptyDir: {}

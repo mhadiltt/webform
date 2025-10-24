@@ -1,9 +1,15 @@
-FROM php:8.2-fpm
+# Nginx container only
+FROM nginx:alpine
 
-WORKDIR /var/www/html
-COPY . .
+# Remove default config
+RUN rm /etc/nginx/conf.d/default.conf
 
-RUN chown -R www-data:www-data /var/www/html
+# Copy custom config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 9000
-CMD ["php-fpm"]
+# Copy web files (optional if using PV)
+# COPY ../jenkins-docker-build/src/ /var/www/html/
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,6 +1,13 @@
-# simple PHP app image (replace with your app's real Dockerfile if needed)
-FROM php:8.2-apache
-COPY . /var/www/html
+FROM php:8.2-fpm
+
+WORKDIR /var/www/html
+
+# Copy your app
+COPY ../jenkins-docker-build/src/ .
+
+# Set permissions
 RUN chown -R www-data:www-data /var/www/html
-EXPOSE 80
-CMD ["apache2-foreground"]
+
+EXPOSE 9000
+
+CMD ["php-fpm"]
