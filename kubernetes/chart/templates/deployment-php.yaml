@@ -19,3 +19,10 @@ spec:
           image: {{ .Values.php.image }}
           ports:
             - containerPort: {{ .Values.php.port }}
+          volumeMounts:
+            - name: webform-code
+              mountPath: /var/www/html
+      volumes:
+        - name: webform-code
+          persistentVolumeClaim:
+            claimName: webform-code-pvc
