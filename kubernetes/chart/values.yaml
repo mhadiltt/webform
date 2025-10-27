@@ -8,4 +8,5 @@ nginx:
   replicas: 1
   port: 80
   configMapName: webform-nginx-config
-buildTag: latest
+
+buildTag: "1"
