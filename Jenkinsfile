@@ -24,17 +24,20 @@ spec:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
           readOnly: false
+
     - name: argocd
       image: hadil01/argocd-cli:latest
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
+
     - name: jnlp
       image: jenkins/inbound-agent:latest
       tty: true
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
+
   volumes:
     - name: docker-socket
       emptyDir: {}
@@ -67,6 +70,7 @@ spec:
             steps {
                 withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
+                        set -e
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                     '''
                 }
@@ -75,19 +79,29 @@ spec:
 
         stage('🐘 Build & Push PHP Image') {
             steps {
-                sh '''
-                    docker build -t $PHP_IMAGE -f Dockerfile .
-                    docker push $PHP_IMAGE
-                '''
+                container('docker') {
+                    sh '''
+                        set -e
+                        echo "🚀 Building PHP image: $PHP_IMAGE"
+                        docker build -t $PHP_IMAGE -f Dockerfile .
+                        docker push $PHP_IMAGE
+                        echo "✅ Pushed PHP image: $PHP_IMAGE"
+                    '''
+                }
             }
         }
 
         stage('🌐 Build & Push NGINX Image') {
             steps {
-                sh '''
-                    docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
-                    docker push $NGINX_IMAGE
-                '''
+                container('docker') {
+                    sh '''
+                        set -e
+                        echo "🚀 Building NGINX image: $NGINX_IMAGE"
+                        docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
+                        docker push $NGINX_IMAGE
+                        echo "✅ Pushed NGINX image: $NGINX_IMAGE"
+                    '''
+                }
             }
         }
 
@@ -96,16 +110,20 @@ spec:
                 container('argocd') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
+                            set -e
+                            echo "🔑 Logging into ArgoCD..."
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
-                            echo "✅ Logged in to ArgoCD"
 
-                            # Update only with BUILD_NUMBER-tagged images
+                            echo "⚙️ Updating ArgoCD app with build-numbered images..."
                             argocd app set $ARGOCD_APP_NAME \
-                              --helm-set phpImage=$PHP_IMAGE \
-                              --helm-set nginxImage=$NGINX_IMAGE
+                                --helm-set phpImage=$PHP_IMAGE \
+                                --helm-set nginxImage=$NGINX_IMAGE
 
+                            echo "🔄 Syncing and waiting for ArgoCD deployment to update..."
                             argocd app sync $ARGOCD_APP_NAME --force
                             argocd app wait $ARGOCD_APP_NAME --health --timeout 300
+
+                            echo "✅ Deployment successfully updated to build #$IMAGE_TAG!"
                         '''
                     }
                 }
