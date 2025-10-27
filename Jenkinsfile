@@ -1,7 +1,6 @@
-    pipeline {
+pipeline {
     agent {
         kubernetes {
-            // run pipeline steps by default in the 'docker' container
             defaultContainer 'docker'
             yaml """
 apiVersion: v1
@@ -12,7 +11,6 @@ spec:
   containers:
     - name: docker
       image: docker:24.0.6-dind
-      imagePullPolicy: IfNotPresent
       securityContext:
         privileged: true
       env:
@@ -26,17 +24,13 @@ spec:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
           readOnly: false
-
     - name: argocd
       image: hadil01/argocd-cli:latest
-      imagePullPolicy: IfNotPresent
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-
     - name: jnlp
       image: jenkins/inbound-agent:latest
-      imagePullPolicy: IfNotPresent
       tty: true
       volumeMounts:
         - name: workspace-volume
@@ -73,7 +67,6 @@ spec:
             steps {
                 withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
-                        set -e
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                     '''
                 }
@@ -83,11 +76,8 @@ spec:
         stage('🐘 Build & Push PHP Image') {
             steps {
                 sh '''
-                    set -e
                     docker build -t $PHP_IMAGE -f Dockerfile .
                     docker push $PHP_IMAGE
-                    docker tag $PHP_IMAGE hadil01/webform-php:latest
-                    docker push hadil01/webform-php:latest
                 '''
             }
         }
@@ -95,41 +85,27 @@ spec:
         stage('🌐 Build & Push NGINX Image') {
             steps {
                 sh '''
-                    set -e
-                    # Build with repository root as context so Dockerfile can COPY src and docker/nginx/nginx.conf
                     docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
                     docker push $NGINX_IMAGE
-                    docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
-                    docker push hadil01/webform-nginx:latest
                 '''
             }
         }
 
-
-        
-        stage('🚀 ArgoCD Sync') {
+        stage('🚀 Update ArgoCD Deployment') {
             steps {
                 container('argocd') {
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
-                            set -e
-                            if ! command -v argocd >/dev/null 2>&1; then
-                              echo "argocd CLI not found in hadil01/argocd-cli:latest"
-                              exit 1
-                            fi
-
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
+                            echo "✅ Logged in to ArgoCD"
 
-                            argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
+                            # Update only with BUILD_NUMBER-tagged images
+                            argocd app set $ARGOCD_APP_NAME \
+                              --helm-set phpImage=$PHP_IMAGE \
+                              --helm-set nginxImage=$NGINX_IMAGE
 
-                            n=0
-                            until [ "$n" -ge 5 ]
-                            do
-                              argocd app sync $ARGOCD_APP_NAME && break
-                              echo "Sync failed, retrying..."
-                              n=$((n+1))
-                              sleep 10
-                            done
+                            argocd app sync $ARGOCD_APP_NAME --force
+                            argocd app wait $ARGOCD_APP_NAME --health --timeout 300
                         '''
                     }
                 }
@@ -139,7 +115,7 @@ spec:
 
     post {
         success {
-            echo "✅ Build & deployment successful!"
+            echo "✅ New build successfully pushed and deployed with BUILD_NUMBER-tagged images!"
         }
         failure {
             echo "❌ Pipeline failed!"
