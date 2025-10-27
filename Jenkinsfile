@@ -119,6 +119,11 @@ spec:
                                 --helm-set phpImage=$PHP_IMAGE \
                                 --helm-set nginxImage=$NGINX_IMAGE
 
+				# 👇 Add this new section to update build number tags
+                    argocd app set $ARGOCD_APP_NAME \
+                        --helm-set hadil01/webform-php.tag=$IMAGE_TAG \
+                        --helm-set hadil01/webform-nginx.tag=$IMAGE_TAG
+
                             echo "🔄 Syncing and waiting for ArgoCD deployment to update..."
                             argocd app sync $ARGOCD_APP_NAME --force
                             argocd app wait $ARGOCD_APP_NAME --health --timeout 300
