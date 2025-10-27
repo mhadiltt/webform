@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: webform-php
+  namespace: new
   labels:
     app: webform-php
 spec:
@@ -16,7 +17,7 @@ spec:
     spec:
       containers:
         - name: php
-          image: {{ .Values.php.image }}
+          image: "{{ .Values.php.image }}"
           ports:
             - containerPort: {{ .Values.php.port }}
           volumeMounts:

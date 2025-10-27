@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: webform-nginx
+  namespace: new
   labels:
     app: webform-nginx
 spec:
@@ -29,5 +30,5 @@ spec:
           configMap:
             name: "{{ .Values.nginx.configMapName }}"
         - name: webform-code
-            persistentVolumeClaim:
+          persistentVolumeClaim:
             claimName: webform-code-pvc

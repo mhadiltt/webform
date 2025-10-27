@@ -18,8 +18,8 @@ data:
 
         location ~ \.php$ {
             include fastcgi_params;
-            fastcgi_pass webform-php:9000;  # PHP-FPM service
+            fastcgi_pass webform-php:9000;  # match service name + port
             fastcgi_index index.php;
-            fastcgi_param SCRIPT_FILENAME /var/www/html$fastcgi_script_name;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         }
     }
