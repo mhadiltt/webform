@@ -8,7 +8,7 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY docker/nginx/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy web files (optional if using PV)
- COPY ../jenkins-docker-build/src/ /var/www/html/
+ COPY jenkins-docker-build/src/ /var/www/html/
 
 EXPOSE 80
 
