@@ -1,10 +1,11 @@
 php:
-  image: hadil01/webform-php:latest
+  image: hadil01/webform-php
   replicas: 1
   port: 9000
 
 nginx:
-  image: nginx:alpine
+  image: hadil01/webform-nginx
   replicas: 1
   port: 80
   configMapName: webform-nginx-config
+buildTag: latest

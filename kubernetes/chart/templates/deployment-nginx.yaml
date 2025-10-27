@@ -17,18 +17,6 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: "{{ .Values.nginx.image }}"
+          image: "{{ .Values.nginx.image }}:{{ .Values.buildTag }}"
           ports:
             - containerPort: {{ .Values.nginx.port }}
-          volumeMounts:
-            - name: nginx-config
-              mountPath: /etc/nginx/conf.d
-            - name: webform-code
-              mountPath: /var/www/html
-      volumes:
-        - name: nginx-config
-          configMap:
-            name: "{{ .Values.nginx.configMapName }}"
-        - name: webform-code
-          persistentVolumeClaim:
-            claimName: webform-code-pvc

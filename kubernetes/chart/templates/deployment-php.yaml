@@ -17,13 +17,6 @@ spec:
     spec:
       containers:
         - name: php
-          image: "{{ .Values.php.image }}"
+          image: "{{ .Values.php.image }}:{{ .Values.buildTag }}"
           ports:
             - containerPort: {{ .Values.php.port }}
-          volumeMounts:
-            - name: webform-code
-              mountPath: /var/www/html
-      volumes:
-        - name: webform-code
-          persistentVolumeClaim:
-            claimName: webform-code-pvc
