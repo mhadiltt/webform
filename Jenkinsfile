@@ -1,7 +1,6 @@
- pipeline {
+pipeline {
     agent {
         kubernetes {
-            // run pipeline steps by default in the 'docker' container
             defaultContainer 'docker'
             yaml """
 apiVersion: v1
@@ -96,7 +95,6 @@ spec:
             steps {
                 sh '''
                     set -e
-                    # Build with repository root as context so Dockerfile can COPY src and docker/nginx/nginx.conf
                     docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
                     docker push $NGINX_IMAGE
                     docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
@@ -105,42 +103,42 @@ spec:
             }
         }
 
+        stage('🚀 ArgoCD Sync') {
+            steps {
+                container('argocd') {
+                    withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
+                        sh '''
+                            set -e
+                            if ! command -v argocd >/dev/null 2>&1; then
+                                echo "argocd CLI not found in hadil01/argocd-cli:latest"
+                                exit 1
+                            fi
 
-        
-	stage('🚀 ArgoCD Sync') {
-   	steps {
-        	container('argocd') {
-           	 withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
-               	 sh '''
-                	    set -e
-                   	 if ! command -v argocd >/dev/null 2>&1; then
-                     	 echo "argocd CLI not found in hadil01/argocd-cli:latest"
-                     	 exit 1
-                   	 fi
+                            # Login to ArgoCD
+                            argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
-                    	argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
+                            # Update Helm image repository and tag dynamically
+                            argocd app set $ARGOCD_APP_NAME \
+                                --helm-set php.image.repository=hadil01/webform-php \
+                                --helm-set php.image.tag=$IMAGE_TAG \
+                                --helm-set nginx.image.repository=hadil01/webform-nginx \
+                                --helm-set nginx.image.tag=$IMAGE_TAG
 
-                    	argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
-
-                   	 # 👇 Add this new section to update build-number tags
-                   	 argocd app set $ARGOCD_APP_NAME \
-                        	--helm-set php.image.tag=$IMAGE_TAG \
-                       		--helm-set nginx.image.tag=$IMAGE_TAG
-
-                   	 n=0
-                   	 until [ "$n" -ge 5 ]
-                   	 do
-                     	 argocd app sync $ARGOCD_APP_NAME && break
-                     	 echo "Sync failed, retrying..."
-                      	n=$((n+1))
-                      	sleep 10
-                    	done
-               		 '''
-	            		}
-        		}
-   	 	}
-	}
-}
+                            # Retry sync if it fails
+                            n=0
+                            until [ "$n" -ge 5 ]
+                            do
+                                argocd app sync $ARGOCD_APP_NAME && break
+                                echo "Sync failed, retrying in 10 seconds..."
+                                n=$((n+1))
+                                sleep 10
+                            done
+                        '''
+                    }
+                }
+            }
+        }
+    }
 
     post {
         success {
