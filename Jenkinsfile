@@ -1,4 +1,3 @@
-cat Jenkinsfile 
  pipeline {
     agent {
         kubernetes {
