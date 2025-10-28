@@ -53,8 +53,8 @@ spec:
 
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
-        PHP_IMAGE_REPO = "hadil01/webform-php"
-        NGINX_IMAGE_REPO = "hadil01/webform-nginx"
+        PHP_IMAGE = "hadil01/webform-php:${IMAGE_TAG}"
+        NGINX_IMAGE = "hadil01/webform-nginx:${IMAGE_TAG}"
         DOCKERHUB_CREDS = 'dockerhub-pass'
         ARGOCD_CREDS = 'argocd-jenkins-creds'
         ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
@@ -83,8 +83,8 @@ spec:
             steps {
                 sh '''
                     set -e
-                    docker build -t $PHP_IMAGE_REPO:$IMAGE_TAG -f Dockerfile .
-                    docker push $PHP_IMAGE_REPO:$IMAGE_TAG
+                    docker build -t $PHP_IMAGE -f Dockerfile .
+                    docker push $PHP_IMAGE
                 '''
             }
         }
@@ -93,8 +93,19 @@ spec:
             steps {
                 sh '''
                     set -e
-                    docker build -t $NGINX_IMAGE_REPO:$IMAGE_TAG -f docker/nginx/Dockerfile .
-                    docker push $NGINX_IMAGE_REPO:$IMAGE_TAG
+                    docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
+                    docker push $NGINX_IMAGE
+                '''
+            }
+        }
+
+        stage('📝 Update values.yaml with Build Tag') {
+            steps {
+                sh '''
+                    set -e
+                    echo "🔄 Updating buildTag in values.yaml..."
+                    sed -i "s/^buildTag:.*/buildTag: \\"${BUILD_NUMBER}\\"/" kubernetes/chart/values.yaml
+                    echo "✅ buildTag updated to ${BUILD_NUMBER}"
                 '''
             }
         }
@@ -105,26 +116,17 @@ spec:
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
                             set -e
-
                             echo "🔑 Logging into ArgoCD..."
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
-                            echo "🧩 Updating Helm values..."
+                            echo "🔧 Updating ArgoCD app with new images..."
                             argocd app set $ARGOCD_APP_NAME \
-                                --helm-set php.image.repository=$PHP_IMAGE_REPO \
-                                --helm-set php.image.tag=$IMAGE_TAG \
-                                --helm-set nginx.image.repository=$NGINX_IMAGE_REPO \
-                                --helm-set nginx.image.tag=$IMAGE_TAG
+                              --helm-set php.image=$PHP_IMAGE \
+                              --helm-set nginx.image=$NGINX_IMAGE \
+                              --helm-set buildTag=$IMAGE_TAG
 
-                            echo "🚀 Syncing ArgoCD Application..."
-                            n=0
-                            until [ "$n" -ge 5 ]
-                            do
-                              argocd app sync $ARGOCD_APP_NAME && break
-                              echo "Sync failed, retrying..."
-                              n=$((n+1))
-                              sleep 10
-                            done
+                            echo "🔄 Syncing application..."
+                            argocd app sync $ARGOCD_APP_NAME
                         '''
                     }
                 }
