@@ -11,8 +11,7 @@ spec:
   containers:
     - name: builder
       image: docker:24.0.6
-      command:
-        - cat
+      command: ["cat"]
       tty: true
       securityContext:
         privileged: true
@@ -21,23 +20,19 @@ spec:
           mountPath: /var/run/docker.sock
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-
     - name: argocd
       image: hadil01/argocd-cli:latest
-      command:
-        - cat
+      command: ["cat"]
       tty: true
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-
     - name: jnlp
       image: jenkins/inbound-agent:latest
       tty: true
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-
   volumes:
     - name: docker-socket
       hostPath:
@@ -49,13 +44,10 @@ spec:
     }
 
     environment {
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
-        PHP_IMAGE = "hadil01/webform-php:${IMAGE_TAG}"
-        NGINX_IMAGE = "hadil01/webform-nginx:${IMAGE_TAG}"
-        DOCKERHUB_CREDS = 'dockerhub-pass'
-        ARGOCD_CREDS = 'argocd-jenkins-creds'
-        ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local"
-        ARGOCD_APP_NAME = "webform"
+        REGISTRY = "hadil01"
+        IMAGE_PHP = "${REGISTRY}/webform-php"
+        IMAGE_NGINX = "${REGISTRY}/webform-nginx"
+        BUILD_TAG = "${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -68,10 +60,10 @@ spec:
         stage('🔐 Docker Login') {
             steps {
                 container('builder') {
-                    withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    withCredentials([string(credentialsId: 'docker-pass', variable: 'DOCKER_PASS')]) {
                         sh '''
                             set -e
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                            echo $DOCKER_PASS | docker login -u ${REGISTRY} --password-stdin
                         '''
                     }
                 }
@@ -83,10 +75,10 @@ spec:
                 container('builder') {
                     sh '''
                         set -e
-                        docker build -t $PHP_IMAGE -f Dockerfile .
-                        docker push $PHP_IMAGE
-                        docker tag $PHP_IMAGE hadil01/webform-php:latest
-                        docker push hadil01/webform-php:latest
+                        docker build -t ${IMAGE_PHP}:${BUILD_TAG} -f Dockerfile .
+                        docker push ${IMAGE_PHP}:${BUILD_TAG}
+                        docker tag ${IMAGE_PHP}:${BUILD_TAG} ${IMAGE_PHP}:latest
+                        docker push ${IMAGE_PHP}:latest
                     '''
                 }
             }
@@ -97,10 +89,10 @@ spec:
                 container('builder') {
                     sh '''
                         set -e
-                        docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
-                        docker push $NGINX_IMAGE
-                        docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
-                        docker push hadil01/webform-nginx:latest
+                        docker build -t ${IMAGE_NGINX}:${BUILD_TAG} -f docker/nginx/Dockerfile .
+                        docker push ${IMAGE_NGINX}:${BUILD_TAG}
+                        docker tag ${IMAGE_NGINX}:${BUILD_TAG} ${IMAGE_NGINX}:latest
+                        docker push ${IMAGE_NGINX}:latest
                     '''
                 }
             }
@@ -109,19 +101,14 @@ spec:
         stage('🚀 Deploy via ArgoCD') {
             steps {
                 container('argocd') {
-                    withCredentials([usernamePassword(credentialsId: 'argocd-login', passwordVariable: 'ARGOCD_PASS', usernameVariable: 'ARGOCD_USER')]) {
+                    withCredentials([usernamePassword(credentialsId: 'argocd-login', usernameVariable: 'ARGO_USER', passwordVariable: 'ARGO_PASS')]) {
                         sh '''
                             set -e
-                            echo "🔗 Logging into ArgoCD..."
-                            argocd login argocd-server.argocd.svc.cluster.local --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
-
-                            echo "🎯 Updating app with new image tags..."
-                            argocd app set webform \
-                              --helm-set php.image=hadil01/webform-php:${BUILD_NUMBER} \
-                              --helm-set nginx.image=hadil01/webform-nginx:${BUILD_NUMBER}
-
-                            echo "🚀 Syncing deployment..."
-                            argocd app sync webform --force
+                            argocd login argocd-server.argocd.svc.cluster.local:443 \
+                                --username $ARGO_USER \
+                                --password $ARGO_PASS \
+                                --insecure
+                            argocd app sync webform
                         '''
                     }
                 }
@@ -131,7 +118,7 @@ spec:
 
     post {
         success {
-            echo "✅ Build & Deployment Successful! (Tag: ${IMAGE_TAG})"
+            echo "✅ Pipeline executed successfully. Build Tag: ${BUILD_TAG}"
         }
         failure {
             echo "❌ Pipeline Failed. Check logs above."
