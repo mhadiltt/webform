@@ -6,110 +6,78 @@ pipeline {
 apiVersion: v1
 kind: Pod
 spec:
-  securityContext:
-    runAsUser: 0
   containers:
-    - name: docker
-      image: docker:24.0.6-cli
-      imagePullPolicy: IfNotPresent
-      securityContext:
-        privileged: true
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
-        - name: workspace-volume
-          mountPath: /home/jenkins/agent
-          readOnly: false
-
-    - name: argocd
-      image: hadil01/argocd-cli:latest
-      imagePullPolicy: IfNotPresent
-      volumeMounts:
-        - name: workspace-volume
-          mountPath: /home/jenkins/agent
-
-    - name: jnlp
-      image: jenkins/inbound-agent:latest
-      imagePullPolicy: IfNotPresent
-      tty: true
-      volumeMounts:
-        - name: workspace-volume
-          mountPath: /home/jenkins/agent
+  - name: docker
+    image: docker:24.0.6-dind
+    securityContext:
+      privileged: true
+    env:
+      - name: DOCKER_TLS_CERTDIR
+        value: ""
+    volumeMounts:
+      - name: dockersock
+        mountPath: /var/run/docker.sock
+  - name: argocd
+    image: argoproj/argocd-cli:v2.9.10
   volumes:
-    - name: docker-socket
+    - name: dockersock
       hostPath:
         path: /var/run/docker.sock
-    - name: workspace-volume
-      emptyDir: {}
 """
         }
     }
 
     environment {
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
-        PHP_IMAGE = "hadil01/webform-php:${IMAGE_TAG}"
-        NGINX_IMAGE = "hadil01/webform-nginx:${IMAGE_TAG}"
-        DOCKERHUB_CREDS = 'dockerhub-pass'
-        ARGOCD_CREDS = 'argocd-jenkins-creds'
-        ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
-        ARGOCD_APP_NAME = "webform"
+        REGISTRY = "hadil01"
+        BUILD_TAG = "${BUILD_NUMBER}"
+        NAMESPACE = "new"
+        CHART_PATH = "./webform/kubernetes/chart"
     }
 
     stages {
-        stage('📥 Checkout Code') {
+        stage('Checkout Code') {
             steps {
-                checkout scm
+                git branch: 'main', url: 'https://github.com/mhadiltt/webform.git'
             }
         }
 
-        stage('🔐 Docker Login') {
-            steps {
-                container('docker') {
-                    withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh '''
-                            set -e
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage('🐘 Build & Push PHP Image') {
+        stage('Build PHP Image') {
             steps {
                 container('docker') {
                     sh '''
-                        set -e
-                        docker build -t $PHP_IMAGE -f Dockerfile .
-                        docker push $PHP_IMAGE
+                    docker build -t $REGISTRY/webform-php:$BUILD_TAG -f php/Dockerfile .
+                    docker push $REGISTRY/webform-php:$BUILD_TAG
                     '''
                 }
             }
         }
 
-        stage('🌐 Build & Push NGINX Image') {
+        stage('Build NGINX Image') {
             steps {
                 container('docker') {
                     sh '''
-                        set -e
-                        docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
-                        docker push $NGINX_IMAGE
+                    docker build -t $REGISTRY/webform-nginx:$BUILD_TAG -f nginx/Dockerfile .
+                    docker push $REGISTRY/webform-nginx:$BUILD_TAG
                     '''
                 }
             }
         }
 
-        stage('🚀 ArgoCD Sync') {
+        stage('Update values.yaml') {
             steps {
-                container('argocd') {
-                    withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
-                        sh '''
-                            set -e
-                            argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
-                            argocd app set $ARGOCD_APP_NAME --helm-set php.image.tag=$IMAGE_TAG --helm-set nginx.image.tag=$IMAGE_TAG
-                            argocd app sync $ARGOCD_APP_NAME
-                        '''
-                    }
+                sh '''
+                sed -i "s|hadil01/webform-php:.*|hadil01/webform-php:$BUILD_TAG|g" $CHART_PATH/values.yaml
+                sed -i "s|hadil01/webform-nginx:.*|hadil01/webform-nginx:$BUILD_TAG|g" $CHART_PATH/values.yaml
+                '''
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                container('docker') {
+                    sh '''
+                    microk8s helm upgrade --install webform $CHART_PATH -n $NAMESPACE
+                    '''
                 }
             }
         }
@@ -117,10 +85,10 @@ spec:
 
     post {
         success {
-            echo "✅ Build & deployment successful!"
+            echo "✅ Build #${BUILD_NUMBER} and deployment successful!"
         }
         failure {
-            echo "❌ Pipeline failed!"
+            echo "❌ Build #${BUILD_NUMBER} failed. Check logs for details."
         }
     }
 }
