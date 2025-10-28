@@ -1,8 +1,6 @@
-cat Jenkinsfile 
- pipeline {
+pipeline {
     agent {
         kubernetes {
-            // run pipeline steps by default in the 'docker' container
             defaultContainer 'docker'
             yaml """
 apiVersion: v1
@@ -64,6 +62,7 @@ spec:
     }
 
     stages {
+
         stage('📥 Checkout Code') {
             steps {
                 checkout scm
@@ -72,7 +71,11 @@ spec:
 
         stage('🔐 Docker Login') {
             steps {
-                withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                withCredentials([usernamePassword(
+                    credentialsId: env.DOCKERHUB_CREDS,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
                     sh '''
                         set -e
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
@@ -87,8 +90,6 @@ spec:
                     set -e
                     docker build -t $PHP_IMAGE -f Dockerfile .
                     docker push $PHP_IMAGE
-                    docker tag $PHP_IMAGE hadil01/webform-php:latest
-                    docker push hadil01/webform-php:latest
                 '''
             }
         }
@@ -97,51 +98,51 @@ spec:
             steps {
                 sh '''
                     set -e
-                    # Build with repository root as context so Dockerfile can COPY src and docker/nginx/nginx.conf
                     docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
                     docker push $NGINX_IMAGE
-                    docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
-                    docker push hadil01/webform-nginx:latest
                 '''
             }
         }
 
+        stage('🚀 ArgoCD Sync') {
+            steps {
+                container('argocd') {
+                    withCredentials([usernamePassword(
+                        credentialsId: env.ARGOCD_CREDS,
+                        usernameVariable: 'ARGOCD_USER',
+                        passwordVariable: 'ARGOCD_PASS'
+                    )]) {
+                        sh '''
+                            set -e
+                            if ! command -v argocd >/dev/null 2>&1; then
+                                echo "argocd CLI not found in hadil01/argocd-cli:latest"
+                                exit 1
+                            fi
 
-        
-    stage('🚀 ArgoCD Sync') {
-    steps {
-            container('argocd') {
-             withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
-                 sh '''
-                        set -e
-                     if ! command -v argocd >/dev/null 2>&1; then
-                         echo "argocd CLI not found in hadil01/argocd-cli:latest"
-                         exit 1
-                     fi
+                            argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
-                        argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
+                            # Update Helm values with build number tag
+                            argocd app set $ARGOCD_APP_NAME \
+                                --helm-set php.image=$PHP_IMAGE \
+                                --helm-set nginx.image=$NGINX_IMAGE \
+                                --helm-set php.image.tag=$IMAGE_TAG \
+                                --helm-set nginx.image.tag=$IMAGE_TAG
 
-                        argocd app set $ARGOCD_APP_NAME --helm-set phpImage=$PHP_IMAGE --helm-set nginxImage=$NGINX_IMAGE
-
-                     # 👇 Add this new section to update build-number tags
-                     argocd app set $ARGOCD_APP_NAME \
-                            --helm-set php.image.tag=$IMAGE_TAG \
-                            --helm-set nginx.image.tag=$IMAGE_TAG
-
-                     n=0
-                     until [ "$n" -ge 5 ]
-                     do
-                         argocd app sync $ARGOCD_APP_NAME && break
-                         echo "Sync failed, retrying..."
-                        n=$((n+1))
-                        sleep 10
-                        done
-                     '''
-                        }
+                            # Retry sync up to 5 times
+                            n=0
+                            until [ "$n" -ge 5 ]
+                            do
+                                argocd app sync $ARGOCD_APP_NAME && break
+                                echo "Sync failed, retrying..."
+                                n=$((n+1))
+                                sleep 10
+                            done
+                        '''
+                    }
                 }
+            }
         }
     }
-}
 
     post {
         success {
