@@ -8,7 +8,7 @@
 </head>
 <body>
     <div class="container">
-        <h2>Contact Raheeba</h2>
+        <h2>Contact Fahad</h2>
         <form action="process-form.php" method="POST">
             <div class="form-group">
                 <input type="text" name="name" placeholder="Your Name" required>
