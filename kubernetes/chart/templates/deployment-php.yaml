@@ -17,6 +17,6 @@ spec:
     spec:
       containers:
         - name: php
-          image: "{{ .Values.php.image }}:{{ .Values.buildTag }}"
+          image: "{{ .Values.php.image.repository }}:{{ .Values.php.image.tag }}"
           ports:
             - containerPort: {{ .Values.php.port }}
