@@ -5,73 +5,63 @@ pipeline {
             yaml """
 apiVersion: v1
 kind: Pod
+metadata:
+  labels:
+    app: jenkins-webform
 spec:
-  securityContext:
-    runAsUser: 0
   containers:
-    - name: builder
-      image: docker:24.0.6
-      command:
-        - cat
-      tty: true
-      securityContext:
-        privileged: true
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
-        - name: workspace-volume
-          mountPath: /home/jenkins/agent
+  - name: builder
+    image: docker:24.0.6
+    command:
+    - cat
+    tty: true
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: docker-socket
+      mountPath: /var/run/docker.sock
+    - name: workspace-volume
+      mountPath: /home/jenkins/agent
 
-    - name: argocd
-      image: hadil01/argocd-cli:latest
-      command:
-        - cat
-      tty: true
-      volumeMounts:
-        - name: workspace-volume
-          mountPath: /home/jenkins/agent
-
-    - name: jnlp
-      image: jenkins/inbound-agent:latest
-      tty: true
-      volumeMounts:
-        - name: workspace-volume
-          mountPath: /home/jenkins/agent
+  - name: argocd
+    image: hadil01/argocd-cli:latest
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: workspace-volume
+      mountPath: /home/jenkins/agent
 
   volumes:
-    - name: docker-socket
-      hostPath:
-        path: /var/run/docker.sock
-    - name: workspace-volume
-      emptyDir: {}
+  - name: docker-socket
+    hostPath:
+      path: /var/run/docker.sock
+  - name: workspace-volume
+    emptyDir: {}
 """
         }
     }
 
     environment {
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
-        PHP_IMAGE = "hadil01/webform-php:${IMAGE_TAG}"
-        NGINX_IMAGE = "hadil01/webform-nginx:${IMAGE_TAG}"
-        DOCKERHUB_CREDS = 'dockerhub-pass'
-        ARGOCD_CREDS = 'argocd-jenkins-creds'
-        ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local"
-        ARGOCD_APP_NAME = "webform"
+        DOCKER_USER = 'hadil01'
     }
 
     stages {
         stage('📥 Checkout Code') {
             steps {
-                checkout scm
+                container('builder') {
+                    checkout scm
+                }
             }
         }
 
         stage('🔐 Docker Login') {
             steps {
                 container('builder') {
-                    withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    withCredentials([string(credentialsId: 'docker-pass', variable: 'DOCKER_PASS')]) {
                         sh '''
                             set -e
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                            echo "$DOCKER_PASS" | docker login -u $DOCKER_USER --password-stdin
                         '''
                     }
                 }
@@ -83,10 +73,10 @@ spec:
                 container('builder') {
                     sh '''
                         set -e
-                        docker build -t $PHP_IMAGE -f Dockerfile .
-                        docker push $PHP_IMAGE
-                        docker tag $PHP_IMAGE hadil01/webform-php:latest
-                        docker push hadil01/webform-php:latest
+                        docker build -t $DOCKER_USER/webform-php:${BUILD_NUMBER} -f Dockerfile .
+                        docker push $DOCKER_USER/webform-php:${BUILD_NUMBER}
+                        docker tag $DOCKER_USER/webform-php:${BUILD_NUMBER} $DOCKER_USER/webform-php:latest
+                        docker push $DOCKER_USER/webform-php:latest
                     '''
                 }
             }
@@ -97,10 +87,10 @@ spec:
                 container('builder') {
                     sh '''
                         set -e
-                        docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
-                        docker push $NGINX_IMAGE
-                        docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
-                        docker push hadil01/webform-nginx:latest
+                        docker build -t $DOCKER_USER/webform-nginx:${BUILD_NUMBER} -f docker/nginx/Dockerfile .
+                        docker push $DOCKER_USER/webform-nginx:${BUILD_NUMBER}
+                        docker tag $DOCKER_USER/webform-nginx:${BUILD_NUMBER} $DOCKER_USER/webform-nginx:latest
+                        docker push $DOCKER_USER/webform-nginx:latest
                     '''
                 }
             }
@@ -109,26 +99,19 @@ spec:
         stage('🚀 Deploy via ArgoCD') {
             steps {
                 container('argocd') {
-                    withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
+                    withCredentials([usernamePassword(credentialsId: 'argocd-login', passwordVariable: 'ARGOCD_PASS', usernameVariable: 'ARGOCD_USER')]) {
                         sh '''
                             set -e
                             echo "🔗 Logging into ArgoCD..."
-                            argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
+                            argocd login argocd-server.argocd.svc.cluster.local --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
                             echo "🎯 Updating app with new image tags..."
-                            argocd app set $ARGOCD_APP_NAME \
-                                --helm-set php.image=$PHP_IMAGE \
-                                --helm-set nginx.image=$NGINX_IMAGE
+                            argocd app set webform \
+                              --helm-set php.image=$DOCKER_USER/webform-php:${BUILD_NUMBER} \
+                              --helm-set nginx.image=$DOCKER_USER/webform-nginx:${BUILD_NUMBER}
 
-                            echo "🔄 Syncing ArgoCD app..."
-                            n=0
-                            until [ "$n" -ge 5 ]
-                            do
-                                argocd app sync $ARGOCD_APP_NAME && break
-                                echo "Sync failed, retrying..."
-                                n=$((n+1))
-                                sleep 10
-                            done
+                            echo "🚀 Syncing deployment..."
+                            argocd app sync webform --force
                         '''
                     }
                 }
@@ -138,7 +121,7 @@ spec:
 
     post {
         success {
-            echo "✅ Build & Deployment Successful! (Tag: ${IMAGE_TAG})"
+            echo "✅ Deployment successful for build #${BUILD_NUMBER}"
         }
         failure {
             echo "❌ Pipeline Failed. Check logs above."
