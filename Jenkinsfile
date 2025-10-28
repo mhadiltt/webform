@@ -53,8 +53,8 @@ spec:
 
     environment {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
-        PHP_IMAGE = "hadil01/webform-php:${IMAGE_TAG}"
-        NGINX_IMAGE = "hadil01/webform-nginx:${IMAGE_TAG}"
+        PHP_IMAGE_REPO = "hadil01/webform-php"
+        NGINX_IMAGE_REPO = "hadil01/webform-nginx"
         DOCKERHUB_CREDS = 'dockerhub-pass'
         ARGOCD_CREDS = 'argocd-jenkins-creds'
         ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local:443"
@@ -83,10 +83,8 @@ spec:
             steps {
                 sh '''
                     set -e
-                    docker build -t $PHP_IMAGE -f Dockerfile .
-                    docker push $PHP_IMAGE
-                    docker tag $PHP_IMAGE hadil01/webform-php:latest
-                    docker push hadil01/webform-php:latest
+                    docker build -t $PHP_IMAGE_REPO:$IMAGE_TAG -f Dockerfile .
+                    docker push $PHP_IMAGE_REPO:$IMAGE_TAG
                 '''
             }
         }
@@ -95,10 +93,8 @@ spec:
             steps {
                 sh '''
                     set -e
-                    docker build -t $NGINX_IMAGE -f docker/nginx/Dockerfile .
-                    docker push $NGINX_IMAGE
-                    docker tag $NGINX_IMAGE hadil01/webform-nginx:latest
-                    docker push hadil01/webform-nginx:latest
+                    docker build -t $NGINX_IMAGE_REPO:$IMAGE_TAG -f docker/nginx/Dockerfile .
+                    docker push $NGINX_IMAGE_REPO:$IMAGE_TAG
                 '''
             }
         }
@@ -109,23 +105,25 @@ spec:
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
                             set -e
+
+                            echo "🔑 Logging into ArgoCD..."
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
-                            
-                            # Update image tags in Helm via ArgoCD
+
+                            echo "🧩 Updating Helm values..."
                             argocd app set $ARGOCD_APP_NAME \
-                                --helm-set php.image.repository=hadil01/webform-php \
+                                --helm-set php.image.repository=$PHP_IMAGE_REPO \
                                 --helm-set php.image.tag=$IMAGE_TAG \
-                                --helm-set nginx.image.repository=hadil01/webform-nginx \
+                                --helm-set nginx.image.repository=$NGINX_IMAGE_REPO \
                                 --helm-set nginx.image.tag=$IMAGE_TAG
-                            
-                            # Sync deployment
+
+                            echo "🚀 Syncing ArgoCD Application..."
                             n=0
                             until [ "$n" -ge 5 ]
                             do
-                                argocd app sync $ARGOCD_APP_NAME && break
-                                echo "Sync failed, retrying..."
-                                n=$((n+1))
-                                sleep 10
+                              argocd app sync $ARGOCD_APP_NAME && break
+                              echo "Sync failed, retrying..."
+                              n=$((n+1))
+                              sleep 10
                             done
                         '''
                     }
