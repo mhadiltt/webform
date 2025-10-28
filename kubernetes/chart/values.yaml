@@ -1,14 +1,14 @@
 php:
   image:
     repository: hadil01/webform-php
-    tag: latest
+    tag: ""        
   replicas: 1
   port: 9000
 
 nginx:
   image:
     repository: hadil01/webform-nginx
-    tag: latest
+    tag: ""       
   replicas: 1
   port: 80
   configMapName: webform-nginx-config
