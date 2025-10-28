@@ -115,7 +115,7 @@ spec:
 
                             echo "🧩 Updating Helm values with new image tags..."
                             argocd app set $ARGOCD_APP_NAME \
-                                --helm-set php.image.tag=$IMAGE_TAG 
+                                --helm-set php.image.tag=$IMAGE_TAG \
                                 --helm-set nginx.image.tag=$IMAGE_TAG
 
                             echo "🔄 Syncing ArgoCD application..."
