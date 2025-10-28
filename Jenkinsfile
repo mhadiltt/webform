@@ -106,19 +106,20 @@ spec:
             }
         }
 
-           stage('🚀 Deploy via ArgoCD') {
-            container('argocd') {
-                withCredentials([usernamePassword(credentialsId: 'argocd-login', passwordVariable: 'ARGOCD_PASS', usernameVariable: 'ARGOCD_USER')]) {
-                    sh '''
-                        set -e
-                        echo "🔗 Logging into ArgoCD..."
-                        argocd login argocd-server.argocd.svc.cluster.local --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
+        stage('🚀 Deploy via ArgoCD') {
+            steps {
+                container('argocd') {
+                    withCredentials([usernamePassword(credentialsId: 'argocd-login', passwordVariable: 'ARGOCD_PASS', usernameVariable: 'ARGOCD_USER')]) {
+                        sh '''
+                            set -e
+                            echo "🔗 Logging into ArgoCD..."
+                            argocd login argocd-server.argocd.svc.cluster.local --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
                             echo "🎯 Updating app with new image tags..."
                             argocd app set webform \
                               --helm-set php.image=hadil01/webform-php:${BUILD_NUMBER} \
                               --helm-set nginx.image=hadil01/webform-nginx:${BUILD_NUMBER}
-    
+
                             echo "🚀 Syncing deployment..."
                             argocd app sync webform --force
                         '''
