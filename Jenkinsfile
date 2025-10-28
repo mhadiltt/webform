@@ -10,18 +10,13 @@ spec:
     runAsUser: 0
   containers:
     - name: docker
-      image: docker:24.0.6-dind
+      image: docker:24.0.6-cli
       imagePullPolicy: IfNotPresent
       securityContext:
         privileged: true
-      env:
-        - name: DOCKER_TLS_CERTDIR
-          value: ""
       volumeMounts:
-        - name: docker-graph-storage
-          mountPath: /var/lib/docker
         - name: docker-socket
-          mountPath: /var/run/docker.sock   # ✅ Correct socket mount
+          mountPath: /var/run/docker.sock
         - name: workspace-volume
           mountPath: /home/jenkins/agent
           readOnly: false
@@ -29,7 +24,6 @@ spec:
     - name: argocd
       image: hadil01/argocd-cli:latest
       imagePullPolicy: IfNotPresent
-      tty: true
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
@@ -43,10 +37,8 @@ spec:
           mountPath: /home/jenkins/agent
   volumes:
     - name: docker-socket
-      hostPath:                     # ✅ Mount Docker host socket
+      hostPath:
         path: /var/run/docker.sock
-    - name: docker-graph-storage
-      emptyDir: {}
     - name: workspace-volume
       emptyDir: {}
 """
@@ -113,28 +105,9 @@ spec:
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
                             set -e
-                            if ! command -v argocd >/dev/null 2>&1; then
-                                echo "argocd CLI not found in hadil01/argocd-cli:latest"
-                                exit 1
-                            fi
-
-                            # 🔐 Login
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
-
-                            # 🧩 Set Helm values correctly using your actual keys from values.yaml
-                            argocd app set $ARGOCD_APP_NAME \
-                              --helm-set php.image=$PHP_IMAGE \
-                              --helm-set nginx.image=$NGINX_IMAGE
-
-                            # 🔄 Retry sync if ArgoCD operation already in progress
-                            n=0
-                            until [ "$n" -ge 5 ]
-                            do
-                                argocd app sync $ARGOCD_APP_NAME && break
-                                echo "Sync failed, retrying..."
-                                n=$((n+1))
-                                sleep 10
-                            done
+                            argocd app set $ARGOCD_APP_NAME --helm-set php.image.tag=$IMAGE_TAG --helm-set nginx.image.tag=$IMAGE_TAG
+                            argocd app sync $ARGOCD_APP_NAME
                         '''
                     }
                 }
