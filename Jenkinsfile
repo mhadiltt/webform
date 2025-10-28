@@ -6,28 +6,14 @@ pipeline {
 apiVersion: v1
 kind: Pod
 spec:
-  serviceAccountName: jenkins
   securityContext:
     runAsUser: 0
   containers:
     - name: docker
-      image: docker:24.0.6
-      command:
-        - cat
-      tty: true
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
-        - name: workspace-volume
-          mountPath: /home/jenkins/agent
-          readOnly: false
-
-    - name: dind
       image: docker:24.0.6-dind
+      imagePullPolicy: IfNotPresent
       securityContext:
         privileged: true
-      args:
-        - --host=tcp://0.0.0.0:2375
       env:
         - name: DOCKER_TLS_CERTDIR
           value: ""
@@ -36,25 +22,28 @@ spec:
           mountPath: /var/lib/docker
         - name: docker-socket
           mountPath: /var/run
-          
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+          readOnly: false
+
     - name: argocd
       image: hadil01/argocd-cli:latest
-      tty: true
+      imagePullPolicy: IfNotPresent
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
 
     - name: jnlp
       image: jenkins/inbound-agent:latest
+      imagePullPolicy: IfNotPresent
       tty: true
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-
   volumes:
-    - name: docker-graph-storage
-      emptyDir: {}
     - name: docker-socket
+      emptyDir: {}
+    - name: docker-graph-storage
       emptyDir: {}
     - name: workspace-volume
       emptyDir: {}
@@ -81,38 +70,32 @@ spec:
 
         stage('🔐 Docker Login') {
             steps {
-                container('docker') {
-                    withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh '''
-                            set -e
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        '''
-                    }
+                withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDS, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        set -e
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                    '''
                 }
             }
         }
 
         stage('🐘 Build & Push PHP Image') {
             steps {
-                container('docker') {
-                    sh '''
-                        set -e
-                        docker build -t $PHP_IMAGE_REPO:$IMAGE_TAG -f Dockerfile .
-                        docker push $PHP_IMAGE_REPO:$IMAGE_TAG
-                    '''
-                }
+                sh '''
+                    set -e
+                    docker build -t $PHP_IMAGE_REPO:$IMAGE_TAG -f Dockerfile .
+                    docker push $PHP_IMAGE_REPO:$IMAGE_TAG
+                '''
             }
         }
 
         stage('🌐 Build & Push NGINX Image') {
             steps {
-                container('docker') {
-                    sh '''
-                        set -e
-                        docker build -t $NGINX_IMAGE_REPO:$IMAGE_TAG -f docker/nginx/Dockerfile .
-                        docker push $NGINX_IMAGE_REPO:$IMAGE_TAG
-                    '''
-                }
+                sh '''
+                    set -e
+                    docker build -t $NGINX_IMAGE_REPO:$IMAGE_TAG -f docker/nginx/Dockerfile .
+                    docker push $NGINX_IMAGE_REPO:$IMAGE_TAG
+                '''
             }
         }
 
@@ -122,6 +105,7 @@ spec:
                     withCredentials([usernamePassword(credentialsId: env.ARGOCD_CREDS, usernameVariable: 'ARGOCD_USER', passwordVariable: 'ARGOCD_PASS')]) {
                         sh '''
                             set -e
+
                             echo "🔑 Logging into ArgoCD..."
                             argocd login $ARGOCD_SERVER --username $ARGOCD_USER --password $ARGOCD_PASS --insecure
 
@@ -133,7 +117,14 @@ spec:
                                 --helm-set nginx.image.tag=$IMAGE_TAG
 
                             echo "🚀 Syncing ArgoCD Application..."
-                            argocd app sync $ARGOCD_APP_NAME
+                            n=0
+                            until [ "$n" -ge 5 ]
+                            do
+                              argocd app sync $ARGOCD_APP_NAME && break
+                              echo "Sync failed, retrying..."
+                              n=$((n+1))
+                              sleep 10
+                            done
                         '''
                     }
                 }
@@ -143,10 +134,10 @@ spec:
 
     post {
         success {
-            echo "✅ Build & Deployment Successful!"
+            echo "✅ Build & deployment successful!"
         }
         failure {
-            echo "❌ Pipeline Failed!"
+            echo "❌ Pipeline failed!"
         }
     }
 }
